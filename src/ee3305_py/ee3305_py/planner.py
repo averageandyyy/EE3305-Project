@@ -169,24 +169,29 @@ class Planner(Node):
     # Runs the path planning algorithm based on the world coordinates.
     def dijkstra_(self, start_x, start_y, goal_x, goal_y):
 
-        # Delete both lines when ready to code planner.py -----------------
-        self.publishInterpolatedPath(start_x, start_y, goal_x, goal_y)
-        return
-
         # Initializations ---------------------------------
 
         # Initialize nodes
-        nodes = [DijkstraNode(0, 0)]  # replace this
+        # Initialize all nodes with infinite cost and no parents by default
+        nodes = [
+            DijkstraNode(c, r)
+            for r in range(self.costmap_rows_)
+            for c in range(self.costmap_cols_)
+        ]
 
         # Initialize start and goal
         rbt_c, rbt_r = self.XYToCR_(start_x, start_y)
-        goal_c, goal_r = (1, 1)  # replace this
+        goal_c, goal_r = self.XYToCR_(goal_x, goal_y)
         rbt_idx = self.CRToIndex_(rbt_c, rbt_r)
+        nodes[rbt_idx].g = 0
         start_node = nodes[rbt_idx]
 
         # Initialize open list
         open_list = []
         heappush(open_list, start_node)
+
+        # Create visited set
+        visited = set()
 
         # Expansion Loop ---------------------------------
         while len(open_list) > 0:
@@ -195,6 +200,11 @@ class Planner(Node):
             node = heappop(open_list)
 
             # Skip if visited
+            if self.CRToIndex_(node.c, node.r) in visited:
+                continue
+
+            # Mark node as visited using index as unique identifier
+            visited.add(self.CRToIndex_(node.c, node.r))
 
             # Return path if reached goal
             if node.c == goal_c and node.r == goal_r:
@@ -203,6 +213,18 @@ class Planner(Node):
                 msg_path.header.frame_id = "map"
 
                 # obtain the path from the nodes.
+                path = []
+                while node.parent != None:
+                    path.append(node)
+                    node = node.parent
+                path.reverse()
+                for node in path:
+                    pose = PoseStamped()
+                    pose.pose.position.x, pose.pose.position.y = self.CRToXY_(
+                        node.c,
+                        node.r,
+                    )
+                    msg_path.poses.append(pose)
 
                 # publish path
                 self.pub_path_.publish(msg_path)
@@ -225,21 +247,36 @@ class Planner(Node):
                 (1, -1),
             ]:
                 # Get neighbor coordinates and neighbor
-                nb_c = dc
-                nb_r = dr
-                nb_idx = 0 * nb_c * nb_r
+                nb_c = dc + node.c
+                nb_r = dr + node.r
+                nb_idx = self.CRToIndex_(nb_c, nb_r)
 
                 # Continue if out of map
+                if self.outOfMap_(nb_c, nb_r):
+                    continue
 
                 # Get the neighbor node
                 nb_node = nodes[nb_idx]
 
                 # Continue if neighbor is expanded
+                if nb_idx in visited:
+                    continue
 
                 # Ignore if the cell cost exceeds max_access_cost (to avoid passing through obstacles)
+                if self.costmap_[nb_idx] > self.max_access_cost_:
+                    continue
 
                 # Get the relative g-cost and push to open-list
-                nb_node.g = 0.0
+                nb_x, nb_y = self.CRToXY_(nb_c, nb_r)
+                node_x, node_y = self.CRToXY_(node.c, node.r)
+                new_g = node.g + hypot(nb_x - node_x, nb_y - node_y) * (
+                    self.costmap_[nb_idx] + 1
+                )
+
+                if new_g < nb_node.g:
+                    nb_node.g = new_g
+                    nb_node.parent = node
+                    heappush(open_list, nb_node)
 
         self.get_logger().warn("No Path Found!")
 
