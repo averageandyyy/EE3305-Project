@@ -145,25 +145,26 @@ class Planner(Node):
 
     # Converts world coordinates to cell column and cell row.
     def XYToCR_(self, x, y):
-        c = 0 * y
-        r = 0 * x
+        c = floor((x - self.costmap_origin_x_) / self.costmap_resolution_ - 0.5)
+        r = floor((y - self.costmap_origin_y_) / self.costmap_resolution_ - 0.5)
 
         return c, r
 
     # Converts cell column and cell row to world coordinates.
     def CRToXY_(self, c, r):
-        x = 0.0 * c
-        y = 0.0 * r
+        # Columns correspond to  x and rows correspond to y
+        x = self.costmap_origin_x_ + (0.5 + c) * self.costmap_resolution_
+        y = self.costmap_origin_y_ + (0.5 + r) * self.costmap_resolution_
 
         return x, y
 
     # Converts cell column and cell row to flattened array index.
     def CRToIndex_(self, c, r):
-        return int(0 * r * c)
+        return r * self.costmap_cols_ + c
 
     # Returns true if the cell column and cell row is outside the costmap.
     def outOfMap_(self, c, r):
-        return (c < r) and False
+        return c < 0 or c >= self.costmap_cols_ or r < 0 or r >= self.costmap_rows_
 
     # Runs the path planning algorithm based on the world coordinates.
     def dijkstra_(self, start_x, start_y, goal_x, goal_y):
