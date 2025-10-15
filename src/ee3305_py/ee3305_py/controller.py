@@ -1,10 +1,10 @@
-from math import hypot, atan2, inf, cos, sin
+from math import atan2, cos, hypot, inf, sin
 
 import rclpy
-from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data, qos_profile_services_default
 from geometry_msgs.msg import PoseStamped, TwistStamped
 from nav_msgs.msg import Odometry, Path
+from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data, qos_profile_services_default
 from sensor_msgs.msg import LaserScan
 
 
@@ -32,14 +32,36 @@ class Controller(Node):
 
         # Handles: Topic Subscribers
         # !TODO: path subscriber
+        self.sub_path_ = self.create_subscription(
+            Path,
+            "path",
+            self.callbackSubPath_,
+            10,
+        )
 
         # !TODO: odometry subscriber
+        self.sub_odom_ = self.create_subscription(
+            Odometry,
+            "odom",
+            self.callbackSubOdom_,
+            10,
+        )
 
         # Handles: Topic Publishers
         # !TODO: command velocities publisher
+        self.pub_cmd_vel_ = self.create_publisher(
+            TwistStamped,
+            "cmd_vel",
+            10,
+        )
 
         # !TODO: lookahead point publisher
-        
+        self.pub_look_ahead_ = self.create_publisher(
+            PoseStamped,
+            "lookahead",
+            10,
+        )
+
         # Handles: Timers
         self.timer = self.create_timer(1.0 / self.frequency_, self.callbackTimer_)
 
@@ -48,7 +70,7 @@ class Controller(Node):
         self.received_path_ = False
 
     # Callbacks =============================================================
-    
+
     # Path subscriber callback
     def callbackSubPath_(self, msg: Path):
         if len(msg.poses) == 0:  # not msg.poses is fine but not clear
@@ -64,9 +86,13 @@ class Controller(Node):
     def callbackSubOdom_(self, msg: Odometry):
         # !TODO: write robot pose to rbt_x_, rbt_y_, rbt_yaw_
         self.rbt_x_ = msg.pose.pose.position.x
+        self.rbt_y_ = msg.pose.pose.position.y
 
         q = msg.pose.pose.orientation
-        self.rbt_yaw_ = q.w
+        delta_x = 2 * (q.w * q.z + q.x * q.y)
+        delta_y = 1 - 2 * (q.y * q.y + q.z * q.z)
+        phi = atan2(delta_y, delta_x)
+        self.rbt_yaw_ = phi
 
         self.received_odom_ = True
 

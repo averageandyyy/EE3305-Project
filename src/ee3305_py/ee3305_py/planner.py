@@ -1,15 +1,11 @@
-from heapq import heappush, heappop
-from math import hypot, floor, inf
+from heapq import heappop, heappush
+from math import floor, hypot, inf
 
 import rclpy
-from rclpy.node import Node
-from rclpy.qos import (
-    QoSProfile,
-    DurabilityPolicy,
-    qos_profile_services_default,
-)
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import OccupancyGrid, Path
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_services_default
 
 
 class DijkstraNode:
@@ -54,9 +50,20 @@ class Planner(Node):
         )
 
         # !TODO: Path request subscriber
+        self.sub_path_request_ = self.create_subscription(
+            Path,
+            "path_request",
+            self.callbackSubPathRequest_,
+            10,
+        )
 
         # Handles: Publishers
         # !TODO: Path publisher
+        self.pub_path_ = self.create_publisher(
+            Path,
+            "path",
+            10,
+        )
 
         # Handles: Timers
         self.timer = self.create_timer(0.1, self.callbackTimer_)
@@ -68,18 +75,26 @@ class Planner(Node):
     # Callbacks =============================================================
 
     # Path request subscriber callback
-    def callbackSubPathRequest_(self, msg: Path):   
-        
+    def callbackSubPathRequest_(self, msg: Path):
+
         # !TODO: write to rbt_x_, rbt_y_, goal_x_, goal_y_
-        self.rbt_x_ = msg.poses[1].pose.orientation.x
+        self.rbt_x_ = msg.poses[0].pose.position.x
+        self.rbt_y_ = msg.poses[0].pose.position.y
+        self.goal_x_ = msg.poses[1].pose.position.x
+        self.goal_y_ = msg.poses[1].pose.position.y
 
         self.has_new_request_ = True
 
     # Global costmap subscriber callback
     # This is only run once because the costmap is only published once, at the start of the launch.
     def callbackSubGlobalCostmap_(self, msg: OccupancyGrid):
-        
+
         # !TODO: write to costmap_, costmap_resolution_, costmap_origin_x_, costmap_origin_y_, costmap_rows_, costmap_cols_
+        self.costmap_ = msg.data
+        self.costmap_resolution_ = msg.info.resolution
+        self.costmap_origin_x_ = msg.info.origin.position.x
+        self.costmap_origin_y_ = msg.info.origin.position.y
+        self.costmap_rows_ = msg.info.height
         self.costmap_cols_ = msg.info.width
 
         self.received_map_ = True
