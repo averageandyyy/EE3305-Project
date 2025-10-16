@@ -1,3 +1,4 @@
+import time
 from heapq import heappop, heappush
 from math import floor, hypot, inf
 
@@ -6,6 +7,8 @@ from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import OccupancyGrid, Path
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_services_default
+
+from ee3305_py.fast_rrt_star_planner import FastRRTStarPlanner
 
 
 class DijkstraNode:
@@ -97,6 +100,16 @@ class Planner(Node):
         self.costmap_rows_ = msg.info.height
         self.costmap_cols_ = msg.info.width
 
+        self.FRRTStarPlanner_ = FastRRTStarPlanner(
+            self.costmap_,
+            self.costmap_origin_x_,
+            self.costmap_origin_y_,
+            self.costmap_resolution_,
+            self.costmap_cols_,
+            self.costmap_rows_,
+            self.max_access_cost_,
+        )
+
         self.received_map_ = True
 
     # runs the path planner at regular intervals as long as there is a new path request.
@@ -106,6 +119,25 @@ class Planner(Node):
 
         # run the path planner
         self.dijkstra_(self.rbt_x_, self.rbt_y_, self.goal_x_, self.goal_y_)
+        # start_time = time.perf_counter()
+        # path = self.FRRTStarPlanner_.make_plan(self.rbt_x_, self.rbt_y_, self.goal_x_, self.goal_y_)
+        # end_time = time.perf_counter()
+        # print(f"Path planning took {end_time - start_time:.4f} seconds.")
+        # if len(path) == 0:
+        #     self.get_logger().warn("No Path Found!")
+        # else:
+        #     msg_path = Path()
+        #     msg_path.header.stamp = self.get_clock().now().to_msg()
+        #     msg_path.header.frame_id = "map"
+        #     for node in path:
+        #         pose = PoseStamped()
+        #         pose.pose.position.x = node.position_x
+        #         pose.pose.position.y = node.position_y
+        #         msg_path.poses.append(pose)
+        #     self.pub_path_.publish(msg_path)
+        #     self.get_logger().info(
+        #         f"Path Found from Rbt @ ({self.rbt_x_:7.3f}, {self.rbt_y_:7.3f}) to Goal @ ({self.goal_x_:7.3f},{self.goal_y_:7.3f})"
+        #     )
 
         self.has_new_request_ = False
 
@@ -168,7 +200,7 @@ class Planner(Node):
 
     # Runs the path planning algorithm based on the world coordinates.
     def dijkstra_(self, start_x, start_y, goal_x, goal_y):
-
+        start_time = time.perf_counter()
         # Initializations ---------------------------------
 
         # Initialize nodes
@@ -208,6 +240,8 @@ class Planner(Node):
 
             # Return path if reached goal
             if node.c == goal_c and node.r == goal_r:
+                end_time = time.perf_counter()
+                print(f"Dijkstra's algorithm took {end_time - start_time:.4f} seconds.")
                 msg_path = Path()
                 msg_path.header.stamp = self.get_clock().now().to_msg()
                 msg_path.header.frame_id = "map"
