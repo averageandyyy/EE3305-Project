@@ -25,10 +25,11 @@
   - [x] Be able to subscribe to path request
   - [x] Be able to subscribe to global costmap (from Map Server)
   - [x] Be able to publish a desired path (to Controller)
-    - [ ] Implement Dijkstra
-    - [ ] Publish interpolated path
-    - [ ] Conversion functions
-    - [ ] outOfMap
+    - [x] Implement Dijkstra
+    - [x] Conversion functions
+    - [x] outOfMap
+  - [ ] Path planner tuning parameters using Djikstra (`max_access_cost_`, inflation radius etc.)
+  - [ ] Improvements to Djikstra?
 - [ ] Controller Node
   - [x] Be able to subscribe to odometry
   - [x] Be able to subscribe to a desired path
