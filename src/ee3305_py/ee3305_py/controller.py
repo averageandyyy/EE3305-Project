@@ -78,8 +78,7 @@ class Controller(Node):
             return  # do not update the path if no path is returned. This will ensure the copied path contains at least one point when the first non-empty path is received.
 
         # !TODO: copy the array from the path
-        self.path_poses_ = []
-
+        self.path_poses_ = msg.poses.copy()
         self.received_path_ = True
 
     # Odometry subscriber callback
@@ -91,7 +90,7 @@ class Controller(Node):
         q = msg.pose.pose.orientation
         delta_x = 2 * (q.w * q.z + q.x * q.y)
         delta_y = 1 - 2 * (q.y * q.y + q.z * q.z)
-        phi = atan2(delta_y, delta_x)
+        phi = atan2(delta_x, delta_y)
         self.rbt_yaw_ = phi
 
         self.received_odom_ = True
@@ -100,10 +99,31 @@ class Controller(Node):
     # Make sure path and robot positions are already received, and the path contains at least one point.
     def getLookaheadPoint_(self):
         # Find the point along the path that is closest to the robot
+        closest_dist = inf
+        closest_idx = 0
+        
+        for i, pose in enumerate(self.path_poses_):
+            curr_x = pose.pose.position.x
+            curr_y = pose.pose.position.y
+            curr_dist = hypot(curr_x - self.rbt_x_, curr_y - self.rbt_y_)
+            
+            if curr_dist < closest_dist:
+                closest_dist = curr_dist
+                closest_idx = i
+        
+        # From the closest point, proceed towards the goal and find the lookahead point
+        lookahead_idx = len(self.path_poses_) - 1  # Default to goal point
 
-        # From the closest point, iterate towards the goal and find the first point that is at least a lookahead distance away.
-        # Return the goal point if no such lookahead point can be found
-        lookahead_idx = len(self.path_poses_) - 1
+        for i in range(closest_idx, len(self.path_poses_)):
+            pose = self.path_poses_[i]
+            curr_x = pose.pose.position.x
+            curr_y = pose.pose.position.y
+            curr_dist = hypot(curr_x - self.rbt_x_, curr_y - self.rbt_y_)
+            
+            # Find the first point that is at least lookahead distance away
+            if curr_dist >= self.lookahead_distance_:
+                lookahead_idx = i
+                break # gotten first pt
 
         # Get the lookahead coordinates
         lookahead_pose = self.path_poses_[lookahead_idx]
@@ -116,7 +136,7 @@ class Controller(Node):
         msg_lookahead.header.frame_id = "map"
         msg_lookahead.pose.position.x = lookahead_x
         msg_lookahead.pose.position.y = lookahead_y
-        self.pub_lookahead_.publish(msg_lookahead)
+        self.pub_look_ahead_.publish(msg_lookahead) # original code was missing "_"
 
         # Return the coordinates
         return lookahead_x, lookahead_y
@@ -128,19 +148,36 @@ class Controller(Node):
 
         # get lookahead point
         lookahead_x, lookahead_y = self.getLookaheadPoint_()
-
         # get distance to lookahead point (not to be confused with lookahead_distance)
-
+        distance_to_lookahead = hypot(lookahead_x - self.rbt_x_, lookahead_y - self.rbt_y_)
         # stop the robot if close to the point.
+        if distance_to_lookahead < self.stop_thres_:
+            # saturate velocities.
+            # but only when the robot is travelling too fast (which should not occur if well tuned).
+            lin_vel = 0.0
+            ang_vel = 0.0
+        else:
+            # get curvature, do transformation from robot frame to local frame
+            dx = lookahead_x - self.rbt_x_
+            dy = lookahead_y - self.rbt_y_
 
-        # get curvature
+            local_x = (dx * cos(self.rbt_yaw_)) + (dy * sin(self.rbt_yaw_))
+            local_y = (dy * cos(self.rbt_yaw_)) - (dx * sin(self.rbt_yaw_))
 
-        # calculate velocities
+            # formula from slides
+            curvature = (2 * local_y) / (local_x**2 + local_y**2)
 
-        # saturate velocities. The following can result in the wrong curvature,
-        # but only when the robot is travelling too fast (which should not occur if well tuned).
-        lin_vel = 0.0
-        ang_vel = 0.0 * lookahead_x * lookahead_y
+            # calculate velocities
+            lin_vel = self.lookahead_lin_vel_
+            # idt this will ever get triggered
+            if lin_vel > self.max_lin_vel_:
+                lin_vel = self.max_lin_vel_
+
+            ang_vel = lin_vel * curvature
+            if ang_vel > self.max_ang_vel_:
+                ang_vel = self.max_ang_vel_
+            elif ang_vel < -self.max_ang_vel_:
+                ang_vel = -self.max_ang_vel_
 
         # publish velocities
         msg_cmd_vel = TwistStamped()
@@ -149,6 +186,7 @@ class Controller(Node):
         msg_cmd_vel.twist.angular.z = ang_vel
         self.pub_cmd_vel_.publish(msg_cmd_vel)
 
+        # self.get_logger().info(f"lin_vel: {lin_vel:.3f}, ang_vel: {ang_vel:.3f}")
 
 # Main Boiler Plate =============================================================
 def main(args=None):
