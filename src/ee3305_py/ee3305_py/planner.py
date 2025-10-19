@@ -8,6 +8,7 @@ from nav_msgs.msg import OccupancyGrid, Path
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_services_default
 
+from ee3305_py.a_star_planner import AStarPlanner
 from ee3305_py.fast_rrt_star_planner import FastRRTStarPlanner
 
 
@@ -110,6 +111,16 @@ class Planner(Node):
             self.max_access_cost_,
         )
 
+        self.AStarPlanner_ = AStarPlanner(
+            self.costmap_,
+            self.costmap_origin_x_,
+            self.costmap_origin_y_,
+            self.costmap_resolution_,
+            self.costmap_cols_,
+            self.costmap_rows_,
+            self.max_access_cost_,
+        )
+
         self.received_map_ = True
 
     # runs the path planner at regular intervals as long as there is a new path request.
@@ -119,8 +130,34 @@ class Planner(Node):
 
         # run the path planner
         # self.dijkstra_(self.rbt_x_, self.rbt_y_, self.goal_x_, self.goal_y_)
+
+        # start_time = time.perf_counter()
+        # path = self.FRRTStarPlanner_.make_plan(
+        #     self.rbt_x_,
+        #     self.rbt_y_,
+        #     self.goal_x_,
+        #     self.goal_y_,
+        # )
+        # end_time = time.perf_counter()
+        # print(f"Path planning took {end_time - start_time:.4f} seconds.")
+        # if len(path) == 0:
+        #     self.get_logger().warn("No Path Found!")
+        # else:
+        #     msg_path = Path()
+        #     msg_path.header.stamp = self.get_clock().now().to_msg()
+        #     msg_path.header.frame_id = "map"
+        #     for node in path:
+        #         pose = PoseStamped()
+        #         pose.pose.position.x = node.position_x
+        #         pose.pose.position.y = node.position_y
+        #         msg_path.poses.append(pose)
+        #     self.pub_path_.publish(msg_path)
+        #     self.get_logger().info(
+        #         f"Path Found from Rbt @ ({self.rbt_x_:7.3f}, {self.rbt_y_:7.3f}) to Goal @ ({self.goal_x_:7.3f},{self.goal_y_:7.3f})"
+        #     )
+
         start_time = time.perf_counter()
-        path = self.FRRTStarPlanner_.make_plan(
+        path = self.AStarPlanner_.make_plan(
             self.rbt_x_,
             self.rbt_y_,
             self.goal_x_,
@@ -136,8 +173,8 @@ class Planner(Node):
             msg_path.header.frame_id = "map"
             for node in path:
                 pose = PoseStamped()
-                pose.pose.position.x = node.position_x
-                pose.pose.position.y = node.position_y
+                pose.pose.position.x = node[0]
+                pose.pose.position.y = node[1]
                 msg_path.poses.append(pose)
             self.pub_path_.publish(msg_path)
             self.get_logger().info(
