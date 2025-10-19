@@ -118,26 +118,31 @@ class Planner(Node):
             return  # silently return if no new request or map is not received.
 
         # run the path planner
-        self.dijkstra_(self.rbt_x_, self.rbt_y_, self.goal_x_, self.goal_y_)
-        # start_time = time.perf_counter()
-        # path = self.FRRTStarPlanner_.make_plan(self.rbt_x_, self.rbt_y_, self.goal_x_, self.goal_y_)
-        # end_time = time.perf_counter()
-        # print(f"Path planning took {end_time - start_time:.4f} seconds.")
-        # if len(path) == 0:
-        #     self.get_logger().warn("No Path Found!")
-        # else:
-        #     msg_path = Path()
-        #     msg_path.header.stamp = self.get_clock().now().to_msg()
-        #     msg_path.header.frame_id = "map"
-        #     for node in path:
-        #         pose = PoseStamped()
-        #         pose.pose.position.x = node.position_x
-        #         pose.pose.position.y = node.position_y
-        #         msg_path.poses.append(pose)
-        #     self.pub_path_.publish(msg_path)
-        #     self.get_logger().info(
-        #         f"Path Found from Rbt @ ({self.rbt_x_:7.3f}, {self.rbt_y_:7.3f}) to Goal @ ({self.goal_x_:7.3f},{self.goal_y_:7.3f})"
-        #     )
+        # self.dijkstra_(self.rbt_x_, self.rbt_y_, self.goal_x_, self.goal_y_)
+        start_time = time.perf_counter()
+        path = self.FRRTStarPlanner_.make_plan(
+            self.rbt_x_,
+            self.rbt_y_,
+            self.goal_x_,
+            self.goal_y_,
+        )
+        end_time = time.perf_counter()
+        print(f"Path planning took {end_time - start_time:.4f} seconds.")
+        if len(path) == 0:
+            self.get_logger().warn("No Path Found!")
+        else:
+            msg_path = Path()
+            msg_path.header.stamp = self.get_clock().now().to_msg()
+            msg_path.header.frame_id = "map"
+            for node in path:
+                pose = PoseStamped()
+                pose.pose.position.x = node.position_x
+                pose.pose.position.y = node.position_y
+                msg_path.poses.append(pose)
+            self.pub_path_.publish(msg_path)
+            self.get_logger().info(
+                f"Path Found from Rbt @ ({self.rbt_x_:7.3f}, {self.rbt_y_:7.3f}) to Goal @ ({self.goal_x_:7.3f},{self.goal_y_:7.3f})"
+            )
 
         self.has_new_request_ = False
 
