@@ -13,3 +13,5 @@ straight line path.
   other nodes within search radius and check if can reconnect in a way
   that maintains tree structure and minimize total path length. Will
   actively try to shorten paths.
+- RRT slow because sampling (aka abit of luck involved)
+- AStar the heuristic causes it to not hug walls when you'd expect it to. will naively plan towards the goal and then make a uturn of sorts
