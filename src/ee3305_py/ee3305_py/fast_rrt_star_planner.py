@@ -28,12 +28,13 @@ class FastRRTStarPlanner:
         columns: int,
         rows: int,
         max_access_cost: int,
-        max_iterations: int = 10000,
-        min_iterations: int = 200,
+        max_iterations: int = 20000,
+        min_iterations: int = 2000,
         expansion_radius: float = 5.0,
         search_radius: float = 2.0,
         dichotomy_distance: float = 0.05,
         tolerance_distance: float = 0.25,
+        use_costmap=True,
     ):
         self.costmap_ = costmap
         self.costmap_origin_x_ = origin_x
@@ -48,6 +49,7 @@ class FastRRTStarPlanner:
         self.search_radius_ = search_radius
         self.dichotomy_distance_ = dichotomy_distance
         self.tolerance_distance_ = tolerance_distance
+        self.use_costmap_ = use_costmap
 
         self.start_x = None
         self.start_y = None
@@ -197,11 +199,21 @@ class FastRRTStarPlanner:
             + (node1.position_y - node2.position_y) ** 2
         ) ** 0.5
 
+    def get_cost_multiplier(self, node: Node) -> float:
+        if not self.use_costmap_:
+            return 1.0
+
+        c, r = self.world_to_map(node.position_x, node.position_y)
+        index = r * self.costmap_cols_ + c
+        cost = self.costmap_[index]
+        return 1 + cost
+
     def steer(self, nearest_node: Node, candidate_node: Node) -> Node:
         # Steer candidate_node to be within expansion_radius_ of nearest_node
         # Modifies candidate_node in place
         if self.distance(nearest_node, candidate_node) <= self.expansion_radius_:
-            candidate_node.update_parent_and_cost(nearest_node)
+            cost_multiplier = self.get_cost_multiplier(candidate_node)
+            candidate_node.update_parent_and_cost(nearest_node, cost_multiplier)
             return
 
         theta = atan2(
@@ -227,13 +239,19 @@ class FastRRTStarPlanner:
     def rewire(self, candidate_node: Node, nearby_nodes_indices: list[int]):
         for index in nearby_nodes_indices:
             nearby_node = self.nodes[index]
+            nearby_node_cost_multiplier = self.get_cost_multiplier(nearby_node)
             rewire_cost = candidate_node.cost + candidate_node.get_connection_cost(
-                nearby_node
+                nearby_node,
+                nearby_node_cost_multiplier,
             )
             if rewire_cost < nearby_node.cost and self.is_collision_free(
-                candidate_node, nearby_node
+                candidate_node,
+                nearby_node,
             ):
-                nearby_node.update_parent_and_cost(candidate_node)
+                nearby_node.update_parent_and_cost(
+                    candidate_node,
+                    nearby_node_cost_multiplier,
+                )
 
     def make_plan(
         self, start_x: float, start_y: float, goal_x: float, goal_y: float
@@ -274,12 +292,30 @@ class FastRRTStarPlanner:
                 create_node = self.create_node(reachest_node, candidate_node)
 
                 if create_node is not None:
-                    create_node.update_parent_and_cost(reachest_node.parent)
-                    candidate_node.update_parent_and_cost(create_node)
+                    create_node_cost_multiplier = self.get_cost_multiplier(create_node)
+                    create_node.update_parent_and_cost(
+                        reachest_node.parent,
+                        create_node_cost_multiplier,
+                    )
+
+                    candidate_node_cost_multiplier = self.get_cost_multiplier(
+                        candidate_node,
+                    )
+                    candidate_node.update_parent_and_cost(
+                        create_node,
+                        candidate_node_cost_multiplier,
+                    )
+
                     self.nodes.append(create_node)
                     self.nodes.append(candidate_node)
                 else:
-                    candidate_node.update_parent_and_cost(reachest_node)
+                    candidate_node_cost_multiplier = self.get_cost_multiplier(
+                        candidate_node
+                    )
+                    candidate_node.update_parent_and_cost(
+                        reachest_node,
+                        candidate_node_cost_multiplier,
+                    )
                     self.nodes.append(candidate_node)
 
                 if self.has_initial_plan(goal_node):

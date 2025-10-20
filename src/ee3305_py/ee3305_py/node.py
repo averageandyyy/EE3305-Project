@@ -15,17 +15,26 @@ class Node:
         self.cost = cost
 
     def update_parent_and_cost(
-        self, new_parent: "Node"
+        self,
+        new_parent: "Node",
+        cost_multiplier: float = 1.0,
     ):  # Learnt that "Node" in quotes is for forward reference
         self.parent = new_parent
-        self.cost = new_parent.cost + self.get_connection_cost(new_parent)
+        self.cost = new_parent.cost + self.get_connection_cost(
+            new_parent,
+            cost_multiplier,
+        )
 
-    def get_connection_cost(self, other_node: "Node") -> float:
+    def get_connection_cost(
+        self,
+        other_node: "Node",
+        cost_multiplier: float = 1.0,
+    ) -> float:
         # Euclidean distance
         return (
             (self.position_x - other_node.position_x) ** 2
             + (self.position_y - other_node.position_y) ** 2
-        ) ** 0.5
+        ) ** 0.5 * cost_multiplier
 
     def __eq__(self, value: "Node"):
         return (
