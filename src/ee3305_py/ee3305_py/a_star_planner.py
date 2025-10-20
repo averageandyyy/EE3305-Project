@@ -133,7 +133,7 @@ class AStarPlanner:
                 tentative_g_score = g_score[current] + self.world_distance(
                     current,
                     neighbor,
-                )
+                ) * (self.costmap_[neighbor_index] + 1)
 
                 if tentative_g_score < g_score[neighbor]:
                     came_from[neighbor] = current
