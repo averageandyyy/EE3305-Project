@@ -253,6 +253,10 @@ class FastRRTStarPlanner:
         self.best_path_cost = float("inf")
         self.best_end_node = None
 
+        # Early exit if start and goal are too close
+        if self.distance(start_node, goal_node) <= self.tolerance_distance_:
+            return []
+
         for i in range(self.max_iterations_):
             # Sample free node
             candidate_node = self.sample_free_node()
