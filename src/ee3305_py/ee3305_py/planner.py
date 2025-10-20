@@ -109,7 +109,7 @@ class Planner(Node):
             self.costmap_cols_,
             self.costmap_rows_,
             self.max_access_cost_,
-            use_costmap=False,
+            use_costmap=True,
         )
 
         self.AStarPlanner_ = AStarPlanner(

@@ -1,5 +1,5 @@
 import random
-from math import atan2, cos, sin
+from math import atan2, cos, log, sin
 
 from scipy.spatial import KDTree
 
@@ -206,7 +206,9 @@ class FastRRTStarPlanner:
         c, r = self.world_to_map(node.position_x, node.position_y)
         index = r * self.costmap_cols_ + c
         cost = self.costmap_[index]
-        return 1 + cost
+        # return 1 + cost
+
+        return 1.0 + log(cost + 1) / 10.0
 
     def steer(self, nearest_node: Node, candidate_node: Node) -> Node:
         # Steer candidate_node to be within expansion_radius_ of nearest_node
