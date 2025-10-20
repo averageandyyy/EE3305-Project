@@ -76,7 +76,9 @@ class AStarPlanner:
 
         def heuristic(a: tuple[int, int], b: tuple[int, int]) -> float:
             # Manhattan distance in map coordinates
-            return abs(a[0] - b[0]) + abs(a[1] - b[1])
+            # return abs(a[0] - b[0]) + abs(a[1] - b[1])
+            # Euclidean distance in world coordinates
+            return self.world_distance(a, b)
 
         path_found = False
         self.start_x_map, self.start_y_map = self.world_to_map(start_x, start_y)
