@@ -1,4 +1,4 @@
-from math import cos, sin
+from math import atan2, cos, pi, sin
 
 
 class DWALocalPlanner:
@@ -13,12 +13,13 @@ class DWALocalPlanner:
         max_access_cost: int,
         max_linear_velocity: float = 0.2,
         max_angular_velocity: float = 2,
-        max_linear_acceleration: float = 0.05,
-        max_angular_acceleration: float = 0.1,
+        max_linear_acceleration: float = 2.0,
+        max_angular_acceleration: float = 20.0,
         dt: float = 0.1,
-        linear_velocity_resolution: float = 0.01,
-        angular_velocity_resolution: float = 0.1,
+        linear_velocity_resolution: float = 0.02,
+        angular_velocity_resolution: float = 0.2,
         time_horizon: float = 2.0,
+        goal_tolerance: float = 0.1,
     ):
         self.max_linear_velocity = max_linear_velocity
         self.max_angular_velocity = max_angular_velocity
@@ -28,6 +29,7 @@ class DWALocalPlanner:
         self.linear_velocity_resolution = linear_velocity_resolution
         self.angular_velocity_resolution = angular_velocity_resolution
         self.time_horizon = time_horizon
+        self.goal_tolerance = goal_tolerance
 
         # Robot state in world frame
         self.current_x = None
@@ -64,10 +66,10 @@ class DWALocalPlanner:
 
     def is_collision_free_or_cost(
         self,
-        trajectory: list[tuple[float, float]],
+        trajectory: list[tuple[float, float, float]],
     ) -> float:
         cost = 0.0
-        for x, y in trajectory:
+        for x, y, _ in trajectory:
             index = self.world_to_index(x, y)
             if index == -1:
                 return -1  # Out of bounds
@@ -77,13 +79,46 @@ class DWALocalPlanner:
             cost += self.costmap[index]
         return cost
 
-    def get_goal_cost(
+    def get_adaptive_time_horizon(
         self,
-        trajectory: list[tuple[float, float]],
         goal_x: float,
         goal_y: float,
     ) -> float:
-        last_x, last_y = trajectory[-1]
+        distance_to_goal = (
+            (self.current_x - goal_x) ** 2 + (self.current_y - goal_y) ** 2
+        ) ** 0.5
+
+        # If within 2x goal tolerance, use minimal horizon
+        if distance_to_goal < 2.0 * self.goal_tolerance:
+            return max(0.5, distance_to_goal / self.max_linear_velocity)
+
+        # Otherwise use full horizon
+        return self.time_horizon
+
+    def get_heading_cost(
+        self,
+        trajectory: list[tuple[float, float, float]],
+        goal_x: float,
+        goal_y: float,
+    ) -> float:
+        # We want to minimize the angle between the robot's heading and the goal direction
+        last_x, last_y, last_yaw = trajectory[-1]
+        goal_heading = atan2(goal_y - last_y, goal_x - last_x)
+        heading_error = goal_heading - last_yaw
+        # Normalize angle to [-pi, pi]
+        while heading_error > pi:
+            heading_error -= 2 * pi
+        while heading_error < -pi:
+            heading_error += 2 * pi
+        return abs(heading_error)
+
+    def get_goal_cost(
+        self,
+        trajectory: list[tuple[float, float, float]],
+        goal_x: float,
+        goal_y: float,
+    ) -> float:
+        last_x, last_y, _ = trajectory[-1]
         # Simple Euclidean distance to goal
         return ((last_x - goal_x) ** 2 + (last_y - goal_y) ** 2) ** 0.5
 
@@ -137,6 +172,13 @@ class DWALocalPlanner:
             current_angular_velocity + self.max_angular_acceleration * self.dt,
         )
 
+        # print(
+        #     f"Linear velocity window: [{min_linear_velocity:.3f}, {max_linear_velocity:.3f}]"
+        # )
+        # print(
+        #     f"Angular velocity window: [{min_angular_velocity:.3f}, {max_angular_velocity:.3f}]"
+        # )
+
         possible_linear_velocities = []
         v = min_linear_velocity
         while v <= max_linear_velocity:
@@ -159,6 +201,8 @@ class DWALocalPlanner:
         linear_velocity: float,
         angular_velocity: float,
         time_horizon: float,
+        goal_x: float,
+        goal_y: float,
     ):
         x = self.current_x
         y = self.current_y
@@ -167,12 +211,23 @@ class DWALocalPlanner:
         num_steps = int(time_horizon / self.dt)
 
         # We actually only concern ourselves with positions
-        trajectory = [(x, y)]
+        trajectory = [(x, y, yaw)]
         for _ in range(num_steps):
             x += linear_velocity * cos(yaw) * self.dt
             y += linear_velocity * sin(yaw) * self.dt
             yaw += angular_velocity * self.dt
-            trajectory.append((x, y))
+
+            if yaw > pi:
+                yaw -= 2 * pi
+            elif yaw < -pi:
+                yaw += 2 * pi
+
+            distance_to_goal = ((x - goal_x) ** 2 + (y - goal_y) ** 2) ** 0.5
+            if (
+                distance_to_goal < self.goal_tolerance
+            ):  # Only consider points that are outside goal tolerance
+                break
+            trajectory.append((x, y, yaw))
 
         return trajectory
 
@@ -202,28 +257,59 @@ class DWALocalPlanner:
             )
         )
 
+        # print(
+        #     f"Generated {len(possible_linear_velocities)} possible linear velocities."
+        # )
+        # print(
+        #     f"Generated {len(possible_angular_velocities)} possible angular velocities."
+        # )
+
+        distance_to_goal = (
+            (current_x - goal_x) ** 2 + (current_y - goal_y) ** 2
+        ) ** 0.5
+        if distance_to_goal < self.goal_tolerance:
+            return ((0.0, 0.0), [])
+
         best_velocity_command = (0.0, 0.0)
         min_cost = float("inf")
 
         visualize_trajectories = []
 
+        adative_time_horizon = self.get_adaptive_time_horizon(
+            goal_x,
+            goal_y,
+        )
+
         for v in possible_linear_velocities:
             for w in possible_angular_velocities:
-                trajectory = self.predict_motion(v, w, self.time_horizon)
+                # print(f"Evaluating velocity command: v = {v:.3f}, w = {w:.3f}")
+                trajectory = self.predict_motion(
+                    v,
+                    w,
+                    adative_time_horizon,
+                    goal_x,
+                    goal_y,
+                )
 
+                # visualize_trajectories.append(trajectory) # For all trajectories
                 collision_cost = self.is_collision_free_or_cost(trajectory)
                 if collision_cost == -1:
                     continue  # Skip trajectories that result in collision
 
+                collision_cost = collision_cost / len(
+                    trajectory
+                )  # Average cost per step
+
                 goal_cost = self.get_goal_cost(trajectory, goal_x, goal_y)
                 speed_cost = self.get_speed_cost(v, w)
+                heading_cost = self.get_heading_cost(trajectory, goal_x, goal_y)
 
-                total_cost = 1.0 * collision_cost + 1.0 * goal_cost + 0.1 * speed_cost
+                total_cost = 1.0 * goal_cost + 0.1 * speed_cost + 0.1 * heading_cost
 
                 if total_cost < min_cost:
                     min_cost = total_cost
                     best_velocity_command = (v, w)
 
-                visualize_trajectories.append(trajectory)
+                visualize_trajectories.append(trajectory)  # For pruned trajectories
 
         return (best_velocity_command, visualize_trajectories)

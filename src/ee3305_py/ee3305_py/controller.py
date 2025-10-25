@@ -2,10 +2,18 @@ from math import atan2, cos, hypot, inf, sin
 
 import rclpy
 from geometry_msgs.msg import PoseStamped, TwistStamped
-from nav_msgs.msg import Odometry, Path
+from nav_msgs.msg import OccupancyGrid, Odometry, Path
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data, qos_profile_services_default
+from rclpy.qos import (
+    DurabilityPolicy,
+    QoSProfile,
+    qos_profile_sensor_data,
+    qos_profile_services_default,
+)
 from sensor_msgs.msg import LaserScan
+from visualization_msgs.msg import Marker, MarkerArray
+
+from ee3305_py.dwa_planner import DWALocalPlanner
 
 
 class Controller(Node):
@@ -69,7 +77,57 @@ class Controller(Node):
         self.received_odom_ = False
         self.received_path_ = False
 
+        # Testing variables
+        self.enable_controls_ = True
+        self.visualize_trajectories_ = True
+        self.trajectories_publisher = self.create_publisher(
+            MarkerArray,
+            "/trajectories",
+            10,
+        )
+
+        qos_profile_latch = QoSProfile(
+            history=qos_profile_services_default.history,
+            depth=qos_profile_services_default.depth,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            reliability=qos_profile_services_default.reliability,
+        )
+        # Add costmap subscriber for DWA planner
+        self.sub_global_costmap_ = self.create_subscription(
+            OccupancyGrid,
+            "global_costmap",
+            self.callbackSubGlobalCostmap_,
+            qos_profile_latch,
+        )
+
     # Callbacks =============================================================
+
+    # Occupancy grid subscriber callback for DWA planner
+    def callbackSubGlobalCostmap_(self, msg: OccupancyGrid):
+
+        # !TODO: write to costmap_, costmap_resolution_, costmap_origin_x_, costmap_origin_y_, costmap_rows_, costmap_cols_
+        self.costmap_ = msg.data
+        self.costmap_resolution_ = msg.info.resolution
+        self.costmap_origin_x_ = msg.info.origin.position.x
+        self.costmap_origin_y_ = msg.info.origin.position.y
+        self.costmap_rows_ = msg.info.height
+        self.costmap_cols_ = msg.info.width
+
+        self.costmap_max_access_cost_ = 90  # Hardcoded for now
+
+        self.dwa_planner_ = DWALocalPlanner(
+            costmap=self.costmap_,
+            origin_x=self.costmap_origin_x_,
+            origin_y=self.costmap_origin_y_,
+            resolution=self.costmap_resolution_,
+            columns=self.costmap_cols_,
+            rows=self.costmap_rows_,
+            max_access_cost=self.costmap_max_access_cost_,
+            max_linear_velocity=self.max_lin_vel_,
+            max_angular_velocity=self.max_ang_vel_,
+        )
+
+        self.received_map_ = True
 
     # Path subscriber callback
     def callbackSubPath_(self, msg: Path):
@@ -93,6 +151,10 @@ class Controller(Node):
         phi = atan2(delta_x, delta_y)
         self.rbt_yaw_ = phi
 
+        # Added velocity variables
+        self.rbt_linear_velocity_ = msg.twist.twist.linear.x
+        self.rbt_angular_velocity_ = msg.twist.twist.angular.z
+
         self.received_odom_ = True
 
     # Gets the lookahead point's coordinates based on the current robot's position and planner's path
@@ -101,16 +163,16 @@ class Controller(Node):
         # Find the point along the path that is closest to the robot
         closest_dist = inf
         closest_idx = 0
-        
+
         for i, pose in enumerate(self.path_poses_):
             curr_x = pose.pose.position.x
             curr_y = pose.pose.position.y
             curr_dist = hypot(curr_x - self.rbt_x_, curr_y - self.rbt_y_)
-            
+
             if curr_dist < closest_dist:
                 closest_dist = curr_dist
                 closest_idx = i
-        
+
         # From the closest point, proceed towards the goal and find the lookahead point
         lookahead_idx = len(self.path_poses_) - 1  # Default to goal point
 
@@ -119,11 +181,11 @@ class Controller(Node):
             curr_x = pose.pose.position.x
             curr_y = pose.pose.position.y
             curr_dist = hypot(curr_x - self.rbt_x_, curr_y - self.rbt_y_)
-            
+
             # Find the first point that is at least lookahead distance away
             if curr_dist >= self.lookahead_distance_:
                 lookahead_idx = i
-                break # gotten first pt
+                break  # gotten first pt
 
         # Get the lookahead coordinates
         lookahead_pose = self.path_poses_[lookahead_idx]
@@ -136,7 +198,7 @@ class Controller(Node):
         msg_lookahead.header.frame_id = "map"
         msg_lookahead.pose.position.x = lookahead_x
         msg_lookahead.pose.position.y = lookahead_y
-        self.pub_look_ahead_.publish(msg_lookahead) # original code was missing "_"
+        self.pub_look_ahead_.publish(msg_lookahead)  # original code was missing "_"
 
         # Return the coordinates
         return lookahead_x, lookahead_y
@@ -146,47 +208,66 @@ class Controller(Node):
         if not self.received_odom_ or not self.received_path_:
             return  # return silently if path or odom is not received.
 
-        # get lookahead point
+        # get lookahead point as subgoal
         lookahead_x, lookahead_y = self.getLookaheadPoint_()
-        # get distance to lookahead point (not to be confused with lookahead_distance)
-        distance_to_lookahead = hypot(lookahead_x - self.rbt_x_, lookahead_y - self.rbt_y_)
-        # stop the robot if close to the point.
-        if distance_to_lookahead < self.stop_thres_:
-            # saturate velocities.
-            # but only when the robot is travelling too fast (which should not occur if well tuned).
-            lin_vel = 0.0
-            ang_vel = 0.0
-        else:
-            # get curvature, do transformation from robot frame to local frame
-            dx = lookahead_x - self.rbt_x_
-            dy = lookahead_y - self.rbt_y_
 
-            local_x = (dx * cos(self.rbt_yaw_)) + (dy * sin(self.rbt_yaw_))
-            local_y = (dy * cos(self.rbt_yaw_)) - (dx * sin(self.rbt_yaw_))
+        best_velocity_command, trajectories = (
+            self.dwa_planner_.generate_best_velocity_command(
+                current_x=self.rbt_x_,
+                current_y=self.rbt_y_,
+                current_yaw=self.rbt_yaw_,
+                current_linear_velocity=self.rbt_linear_velocity_,
+                current_angular_velocity=self.rbt_angular_velocity_,
+                goal_x=lookahead_x,
+                goal_y=lookahead_y,
+            )
+        )
 
-            # formula from slides
-            curvature = (2 * local_y) / (local_x**2 + local_y**2)
-
-            # calculate velocities
-            lin_vel = self.lookahead_lin_vel_
-            # idt this will ever get triggered
-            if lin_vel > self.max_lin_vel_:
-                lin_vel = self.max_lin_vel_
-
-            ang_vel = lin_vel * curvature
-            if ang_vel > self.max_ang_vel_:
-                ang_vel = self.max_ang_vel_
-            elif ang_vel < -self.max_ang_vel_:
-                ang_vel = -self.max_ang_vel_
+        self.get_logger().info(f"Generated {len(trajectories)} trajectories.")
+        lin_vel, ang_vel = best_velocity_command
+        self.get_logger().info(
+            f"Best velocity command: lin_vel = {lin_vel:.3f}, ang_vel = {ang_vel:.3f}"
+        )
 
         # publish velocities
         msg_cmd_vel = TwistStamped()
         msg_cmd_vel.header.stamp = self.get_clock().now().to_msg()
         msg_cmd_vel.twist.linear.x = lin_vel
         msg_cmd_vel.twist.angular.z = ang_vel
-        self.pub_cmd_vel_.publish(msg_cmd_vel)
+
+        if self.enable_controls_:
+            self.pub_cmd_vel_.publish(msg_cmd_vel)
+
+        # visualize trajectories
+        if self.visualize_trajectories_:
+            marker_array = MarkerArray()
+            for i, trajectory in enumerate(trajectories):
+                marker = Marker()
+                marker.header.frame_id = "map"
+                marker.header.stamp = self.get_clock().now().to_msg()
+                marker.ns = "trajectory"
+                marker.id = i
+                marker.type = Marker.LINE_STRIP
+                marker.action = Marker.ADD
+                marker.scale.x = 0.01  # line width
+                marker.color.a = 1.0
+                marker.color.r = 0.0
+                marker.color.g = 1.0
+                marker.color.b = 0.0
+
+                for point in trajectory:
+                    x, y, _ = point
+                    p = PoseStamped()
+                    p.pose.position.x = x
+                    p.pose.position.y = y
+                    marker.points.append(p.pose.position)
+
+                marker_array.markers.append(marker)
+
+            self.trajectories_publisher.publish(marker_array)
 
         # self.get_logger().info(f"lin_vel: {lin_vel:.3f}, ang_vel: {ang_vel:.3f}")
+
 
 # Main Boiler Plate =============================================================
 def main(args=None):
