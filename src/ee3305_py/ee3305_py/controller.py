@@ -211,7 +211,7 @@ class Controller(Node):
         # get lookahead point as subgoal
         lookahead_x, lookahead_y = self.getLookaheadPoint_()
 
-        best_velocity_command, trajectories = (
+        best_velocity_command, trajectories, best_traj_index = (
             self.dwa_planner_.generate_best_velocity_command(
                 current_x=self.rbt_x_,
                 current_y=self.rbt_y_,
@@ -251,9 +251,15 @@ class Controller(Node):
                 marker.action = Marker.ADD
                 marker.scale.x = 0.01  # line width
                 marker.color.a = 1.0
-                marker.color.r = 0.0
-                marker.color.g = 1.0
-                marker.color.b = 0.0
+                if i == best_traj_index:
+                    marker.color.r = 1.0
+                    marker.color.g = 0.0
+                    marker.color.b = 0.0
+                    marker.color.a = 5.0
+                else:
+                    marker.color.r = 0.0
+                    marker.color.g = 1.0
+                    marker.color.b = 0.0
 
                 for point in trajectory:
                     x, y, _ = point

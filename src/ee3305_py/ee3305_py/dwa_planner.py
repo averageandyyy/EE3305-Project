@@ -270,12 +270,13 @@ class DWALocalPlanner:
             (current_x - goal_x) ** 2 + (current_y - goal_y) ** 2
         ) ** 0.5
         if distance_to_goal < self.goal_tolerance:
-            return ((0.0, 0.0), [])
+            return ((0.0, 0.0), [], -1)  # Already at goal
 
         best_velocity_command = (0.0, 0.0)
         min_cost = float("inf")
 
         visualize_trajectories = []
+        best_traj_index = -1
 
         adative_time_horizon = self.get_adaptive_time_horizon(
             goal_x,
@@ -312,7 +313,8 @@ class DWALocalPlanner:
                 if total_cost < min_cost:
                     min_cost = total_cost
                     best_velocity_command = (v, w)
+                    best_traj_index = len(visualize_trajectories)
 
                 visualize_trajectories.append(trajectory)  # For pruned trajectories
 
-        return (best_velocity_command, visualize_trajectories)
+        return (best_velocity_command, visualize_trajectories, best_traj_index)
