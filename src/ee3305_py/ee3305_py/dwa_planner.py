@@ -15,10 +15,11 @@ class DWALocalPlanner:
         max_angular_velocity: float = 2,
         max_linear_acceleration: float = 2.0,
         max_angular_acceleration: float = 20.0,
-        dt: float = 0.1,
+        dt: float = 0.05,
         linear_velocity_resolution: float = 0.02,
         angular_velocity_resolution: float = 0.2,
         time_horizon: float = 2.0,
+        horizon_reduction_factor: float = 0.2,
         goal_tolerance: float = 0.1,
     ):
         self.max_linear_velocity = max_linear_velocity
@@ -29,6 +30,7 @@ class DWALocalPlanner:
         self.linear_velocity_resolution = linear_velocity_resolution
         self.angular_velocity_resolution = angular_velocity_resolution
         self.time_horizon = time_horizon
+        self.horizon_reduction_factor = horizon_reduction_factor
         self.goal_tolerance = goal_tolerance
 
         # Robot state in world frame
@@ -89,8 +91,8 @@ class DWALocalPlanner:
         ) ** 0.5
 
         # If within 2x goal tolerance, use minimal horizon
-        if distance_to_goal < 2.0 * self.goal_tolerance:
-            return max(0.5, distance_to_goal / self.max_linear_velocity)
+        if distance_to_goal < 1.5 * self.goal_tolerance:  # Note the magic number here
+            return self.horizon_reduction_factor * self.time_horizon
 
         # Otherwise use full horizon
         return self.time_horizon
@@ -131,7 +133,7 @@ class DWALocalPlanner:
 
         # No need absolute because linear_velocity is always positive
         speed_cost = (self.max_linear_velocity - linear_velocity) ** 2 + (
-            self.max_angular_velocity - abs(angular_velocity)
+            (self.max_angular_velocity - abs(angular_velocity)) / 10
         ) ** 2
         return speed_cost
 
@@ -222,11 +224,11 @@ class DWALocalPlanner:
             elif yaw < -pi:
                 yaw += 2 * pi
 
-            distance_to_goal = ((x - goal_x) ** 2 + (y - goal_y) ** 2) ** 0.5
-            if (
-                distance_to_goal < self.goal_tolerance
-            ):  # Only consider points that are outside goal tolerance
-                break
+            # distance_to_goal = ((x - goal_x) ** 2 + (y - goal_y) ** 2) ** 0.5
+            # if (
+            #     distance_to_goal < self.goal_tolerance
+            # ):  # Only consider points that are outside goal tolerance
+            #     break
             trajectory.append((x, y, yaw))
 
         return trajectory
@@ -286,7 +288,8 @@ class DWALocalPlanner:
                 trajectory = self.predict_motion(
                     v,
                     w,
-                    adative_time_horizon,
+                    # adative_time_horizon,
+                    self.time_horizon,
                     goal_x,
                     goal_y,
                 )
