@@ -14,6 +14,7 @@ from sensor_msgs.msg import LaserScan
 from visualization_msgs.msg import Marker, MarkerArray
 
 from ee3305_py.dwa_planner import DWALocalPlanner
+from ee3305_py.pure_pursuit_controller import PurePursuitController
 
 
 class Controller(Node):
@@ -79,7 +80,7 @@ class Controller(Node):
 
         # Testing variables
         self.enable_controls_ = True
-        self.visualize_trajectories_ = True
+        self.using_dwa = False
         self.trajectories_publisher = self.create_publisher(
             MarkerArray,
             "/trajectories",
@@ -98,6 +99,14 @@ class Controller(Node):
             "global_costmap",
             self.callbackSubGlobalCostmap_,
             qos_profile_latch,
+        )
+
+        # Pure Pursuit Controller
+        self.pure_pursuit_controller_ = PurePursuitController(
+            stop_threshold=self.stop_thres_,
+            lookahead_linear_velocity=self.lookahead_lin_vel_,
+            max_linear_velocity=self.max_lin_vel_,
+            max_angular_velocity=self.max_ang_vel_,
         )
 
     # Callbacks =============================================================
@@ -205,41 +214,24 @@ class Controller(Node):
 
     # Implement the pure pursuit controller here
     def callbackTimer_(self):
-        if not self.received_odom_ or not self.received_path_:
+        if not self.received_odom_ or not self.received_path_ or not self.received_map_:
             return  # return silently if path or odom is not received.
 
         # get lookahead point as subgoal
         lookahead_x, lookahead_y = self.getLookaheadPoint_()
 
-        best_velocity_command, trajectories, best_traj_index = (
-            self.dwa_planner_.generate_best_velocity_command(
-                current_x=self.rbt_x_,
-                current_y=self.rbt_y_,
-                current_yaw=self.rbt_yaw_,
-                current_linear_velocity=self.rbt_linear_velocity_,
-                current_angular_velocity=self.rbt_angular_velocity_,
-                goal_x=lookahead_x,
-                goal_y=lookahead_y,
+        if self.using_dwa:
+            best_velocity_command, trajectories, best_traj_index = (
+                self.dwa_planner_.generate_best_velocity_command(
+                    current_x=self.rbt_x_,
+                    current_y=self.rbt_y_,
+                    current_yaw=self.rbt_yaw_,
+                    current_linear_velocity=self.rbt_linear_velocity_,
+                    current_angular_velocity=self.rbt_angular_velocity_,
+                    goal_x=lookahead_x,
+                    goal_y=lookahead_y,
+                )
             )
-        )
-
-        self.get_logger().info(f"Generated {len(trajectories)} trajectories.")
-        lin_vel, ang_vel = best_velocity_command
-        self.get_logger().info(
-            f"Best velocity command: lin_vel = {lin_vel:.3f}, ang_vel = {ang_vel:.3f}"
-        )
-
-        # publish velocities
-        msg_cmd_vel = TwistStamped()
-        msg_cmd_vel.header.stamp = self.get_clock().now().to_msg()
-        msg_cmd_vel.twist.linear.x = lin_vel
-        msg_cmd_vel.twist.angular.z = ang_vel
-
-        if self.enable_controls_:
-            self.pub_cmd_vel_.publish(msg_cmd_vel)
-
-        # visualize trajectories
-        if self.visualize_trajectories_:
             marker_array = MarkerArray()
             for i, trajectory in enumerate(trajectories):
                 marker = Marker()
@@ -271,8 +263,25 @@ class Controller(Node):
                 marker_array.markers.append(marker)
 
             self.trajectories_publisher.publish(marker_array)
+        else:
+            best_velocity_command = self.pure_pursuit_controller_.get_velocity_command(
+                current_x=self.rbt_x_,
+                current_y=self.rbt_y_,
+                current_yaw=self.rbt_yaw_,
+                lookahead_x=lookahead_x,
+                lookahead_y=lookahead_y,
+            )
 
-        # self.get_logger().info(f"lin_vel: {lin_vel:.3f}, ang_vel: {ang_vel:.3f}")
+        lin_vel, ang_vel = best_velocity_command
+
+        # publish velocities
+        msg_cmd_vel = TwistStamped()
+        msg_cmd_vel.header.stamp = self.get_clock().now().to_msg()
+        msg_cmd_vel.twist.linear.x = lin_vel
+        msg_cmd_vel.twist.angular.z = ang_vel
+
+        if self.enable_controls_:
+            self.pub_cmd_vel_.publish(msg_cmd_vel)
 
 
 # Main Boiler Plate =============================================================
