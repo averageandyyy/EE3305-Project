@@ -274,6 +274,9 @@ class DWALocalPlanner:
 
         best_velocity_command = (0.0, 0.0)
         min_cost = float("inf")
+        min_speed_cost = float("inf")
+        min_heading_cost = float("inf")
+        min_goal_cost = float("inf")
 
         visualize_trajectories = []
         best_traj_index = -1
@@ -312,9 +315,21 @@ class DWALocalPlanner:
 
                 if total_cost < min_cost:
                     min_cost = total_cost
+                    min_speed_cost = speed_cost
+                    min_heading_cost = heading_cost
+                    min_goal_cost = goal_cost
                     best_velocity_command = (v, w)
                     best_traj_index = len(visualize_trajectories)
 
                 visualize_trajectories.append(trajectory)  # For pruned trajectories
-
+        print(
+            f"Best velocity command: v = {best_velocity_command[0]:.3f}, w = {best_velocity_command[1]:.3f}"
+        )
+        print(
+            f"Costs => Total: {min_cost:.3f}, Goal: {min_goal_cost:.3f}, Speed: {min_speed_cost:.3f}, Heading: {min_heading_cost:.3f}"
+        )
+        print(f"Goal position: x = {goal_x:.3f}, y = {goal_y:.3f}")
+        print(
+            f"Best trajectory final position: x = {visualize_trajectories[best_traj_index][-1][0]:.3f}, y = {visualize_trajectories[best_traj_index][-1][1]:.3f}, yaw = {visualize_trajectories[best_traj_index][-1][2]:.3f}"
+        )
         return (best_velocity_command, visualize_trajectories, best_traj_index)
