@@ -1,6 +1,6 @@
 import time
 from heapq import heappop, heappush
-from math import floor, hypot, inf
+from math import atan2, floor, hypot, inf
 
 import rclpy
 from geometry_msgs.msg import PoseStamped
@@ -10,6 +10,7 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_services_default
 
 from ee3305_py.a_star_planner import AStarPlanner
 from ee3305_py.fast_rrt_star_planner import FastRRTStarPlanner
+from ee3305_py.beizer import BezierSmoother
 
 
 class DijkstraNode:
@@ -122,6 +123,16 @@ class Planner(Node):
             self.max_access_cost_,
         )
 
+        self.BezierSmoother_ = BezierSmoother(
+        self.costmap_,
+        self.costmap_origin_x_,
+        self.costmap_origin_y_,
+        self.costmap_resolution_,
+        self.costmap_cols_,
+        self.costmap_rows_,
+        self.max_access_cost_,
+        )
+        
         self.received_map_ = True
 
     # runs the path planner at regular intervals as long as there is a new path request.
@@ -130,7 +141,7 @@ class Planner(Node):
             return  # silently return if no new request or map is not received.
 
         # run the path planner
-        self.dijkstra_(self.rbt_x_, self.rbt_y_, self.goal_x_, self.goal_y_)
+        # self.dijkstra_(self.rbt_x_, self.rbt_y_, self.goal_x_, self.goal_y_)
 
         # start_time = time.perf_counter()
         # path = self.FRRTStarPlanner_.make_plan(
@@ -157,15 +168,16 @@ class Planner(Node):
         #         f"Path Found from Rbt @ ({self.rbt_x_:7.3f}, {self.rbt_y_:7.3f}) to Goal @ ({self.goal_x_:7.3f},{self.goal_y_:7.3f})"
         #     )
 
-        # start_time = time.perf_counter()
-        # path = self.AStarPlanner_.make_plan(
-        #     self.rbt_x_,
-        #     self.rbt_y_,
-        #     self.goal_x_,
-        #     self.goal_y_,
-        # )
-        # end_time = time.perf_counter()
-        # print(f"Path planning with A* took {end_time - start_time:.4f} seconds.")
+        start_time = time.perf_counter()
+        path = self.AStarPlanner_.make_plan(
+            self.rbt_x_,
+            self.rbt_y_,
+            self.goal_x_,
+            self.goal_y_,
+        )
+        end_time = time.perf_counter()
+        print(f"Path planning with A* took {end_time - start_time:.4f} seconds.")
+        # comment out for A*STAR + Bezier smoothing
         # if len(path) == 0:
         #     self.get_logger().warn("No Path Found!")
         # else:
@@ -181,6 +193,43 @@ class Planner(Node):
         #     self.get_logger().info(
         #         f"Path Found from Rbt @ ({self.rbt_x_:7.3f}, {self.rbt_y_:7.3f}) to Goal @ ({self.goal_x_:7.3f},{self.goal_y_:7.3f})"
         #     )
+
+        # comment out for standard A*STAR
+        # path from A* (list[(x,y)]) OR convert RRT* nodes to (x,y)
+        raw_path_xy = path  # A*: already [(x,y)]
+
+        # If using FastRRTStarPlanner:
+        # raw_path_xy = [(n.position_x, n.position_y) for n in path]
+
+        # estimate endpoint headings if you don't have them
+        def est_yaw(pts, head=True):
+            if len(pts) < 2: return None
+            a, b = (pts[0], pts[1]) if head else (pts[-2], pts[-1])
+            return atan2(b[1]-a[1], b[0]-a[0])
+
+        start_yaw = est_yaw(raw_path_xy, head=True)
+        end_yaw   = est_yaw(raw_path_xy, head=False)
+
+        # build (or cache) the smoother once (e.g., after costmap arrives)
+        smoothed = self.BezierSmoother_.smooth(
+            raw_pts=raw_path_xy,
+            offset_frac=0.3,            # expose as ROS param
+            samples_per_seg=80,         # spacing for your controller
+            start_yaw=start_yaw,        # or None if you don't want yaw bias
+            end_yaw=end_yaw,
+            yaw_bias=0.6
+        )
+
+        # publish smoothed path
+        msg_path = Path()
+        msg_path.header.stamp = self.get_clock().now().to_msg()
+        msg_path.header.frame_id = "map"
+        for (x, y) in smoothed:
+            pose = PoseStamped()
+            pose.pose.position.x = float(x)
+            pose.pose.position.y = float(y)
+            msg_path.poses.append(pose)
+        self.pub_path_.publish(msg_path)
 
         self.has_new_request_ = False
 
