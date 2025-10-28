@@ -214,7 +214,7 @@ class Planner(Node):
         smoothed = self.BezierSmoother_.smooth(
             raw_pts=raw_path_xy,
             offset_frac=0.3,            # expose as ROS param
-            samples_per_seg=80,         # spacing for your controller
+            samples_per_seg=10,         # spacing for your controller
             start_yaw=start_yaw,        # or None if you don't want yaw bias
             end_yaw=end_yaw,
             yaw_bias=0.6

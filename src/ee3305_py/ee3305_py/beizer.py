@@ -31,7 +31,7 @@ class BezierSmoother:
         n = np.linalg.norm(v)
         return v / n if n > 1e-9 else v
 
-    def _downsample_path(self, pts, min_dist=0.05, angle_thresh_deg=8.0):
+    def _downsample_path(self, pts, min_dist=0.5, angle_thresh_deg=60.0):
         if len(pts) <= 2:
             return pts[:]
         out = [pts[0]]
@@ -96,7 +96,7 @@ class BezierSmoother:
     
     # offset frac (0.2-0.4) controls how "tight" the curve is, but risk collision
     # samples_per_seg controls smoothness for each segment (how dense, 50-120)
-    def smooth(self, raw_pts, offset_frac=0.3, samples_per_seg=70,
+    def smooth(self, raw_pts, offset_frac=0.5, samples_per_seg=10,
                start_yaw=None, end_yaw=None, yaw_bias=None, target_spacing=0.04, max_points=800):
         """
         raw_pts: list[(x,y)] polyline from A*/Dijkstra/RRT*
@@ -105,7 +105,7 @@ class BezierSmoother:
         if len(raw_pts) < 3:
             return raw_pts[:]
         # tune angle_thresh_dist (increase if want fewer anchor points, smoother)
-        key = self._downsample_path(raw_pts, min_dist=0.05, angle_thresh_deg=30.0)
+        key = self._downsample_path(raw_pts, min_dist=0.5, angle_thresh_deg=60)
         if len(key) < 3:
             return raw_pts[:]
 
