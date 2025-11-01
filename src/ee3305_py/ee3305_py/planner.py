@@ -140,9 +140,14 @@ class Planner(Node):
         if not self.received_map_ or not self.has_new_request_:
             return  # silently return if no new request or map is not received.
 
-        # run the path planner
+        # Planners (uncomment each section based on what we want to run)
+        
+        # -------- Standard Dijkstra --------
         # self.dijkstra_(self.rbt_x_, self.rbt_y_, self.goal_x_, self.goal_y_)
+        # self.has_new_request_ = False
+        # return
 
+        # -------- FastRRTStar --------
         # start_time = time.perf_counter()
         # path = self.FRRTStarPlanner_.make_plan(
         #     self.rbt_x_,
@@ -151,7 +156,8 @@ class Planner(Node):
         #     self.goal_y_,
         # )
         # end_time = time.perf_counter()
-        # print(f"Path planning took {end_time - start_time:.4f} seconds.")
+        # print(f"FastRRTStar planning took {end_time - start_time:.4f} seconds.")
+        # 
         # if len(path) == 0:
         #     self.get_logger().warn("No Path Found!")
         # else:
@@ -167,17 +173,20 @@ class Planner(Node):
         #     self.get_logger().info(
         #         f"Path Found from Rbt @ ({self.rbt_x_:7.3f}, {self.rbt_y_:7.3f}) to Goal @ ({self.goal_x_:7.3f},{self.goal_y_:7.3f})"
         #     )
+        # self.has_new_request_ = False
+        # return
 
-        start_time = time.perf_counter()
-        path = self.AStarPlanner_.make_plan(
-            self.rbt_x_,
-            self.rbt_y_,
-            self.goal_x_,
-            self.goal_y_,
-        )
-        end_time = time.perf_counter()
-        print(f"Path planning with A* took {end_time - start_time:.4f} seconds.")
-        # comment out for A*STAR + Bezier smoothing
+        # -------- A* --------
+        # start_time = time.perf_counter()
+        # path = self.AStarPlanner_.make_plan(
+        #     self.rbt_x_,
+        #     self.rbt_y_,
+        #     self.goal_x_,
+        #     self.goal_y_,
+        # )
+        # end_time = time.perf_counter()
+        # print(f"A* planning took {end_time - start_time:.4f} seconds.")
+        # 
         # if len(path) == 0:
         #     self.get_logger().warn("No Path Found!")
         # else:
@@ -193,34 +202,46 @@ class Planner(Node):
         #     self.get_logger().info(
         #         f"Path Found from Rbt @ ({self.rbt_x_:7.3f}, {self.rbt_y_:7.3f}) to Goal @ ({self.goal_x_:7.3f},{self.goal_y_:7.3f})"
         #     )
+        # self.has_new_request_ = False
+        # return
 
-        # comment out for standard A*STAR
-        # path from A* (list[(x,y)]) OR convert RRT* nodes to (x,y)
-        raw_path_xy = path  # A*: already [(x,y)]
+        # -------- Dijkstra + Bezier Smoothing --------
+        start_time = time.perf_counter()
+        # Get raw path from Dijkstra as list of (x, y) tuples
+        raw_path = []
+        nodes = self._dijkstra_get_path(self.rbt_x_, self.rbt_y_, self.goal_x_, self.goal_y_)
+        for node in nodes:
+            x, y = self.CRToXY_(node.c, node.r)
+            raw_path.append((x, y))
+        end_time = time.perf_counter()
+        print(f"Dijkstra planning took {end_time - start_time:.4f} seconds.")
 
-        # If using FastRRTStarPlanner:
-        # raw_path_xy = [(n.position_x, n.position_y) for n in path]
+        if len(raw_path) == 0:
+            self.get_logger().warn("No Path Found!")
+            self.has_new_request_ = False
+            return
 
-        # estimate endpoint headings if you don't have them
+        # Apply Bezier smoothing
         def est_yaw(pts, head=True):
             if len(pts) < 2: return None
             a, b = (pts[0], pts[1]) if head else (pts[-2], pts[-1])
             return atan2(b[1]-a[1], b[0]-a[0])
 
-        start_yaw = est_yaw(raw_path_xy, head=True)
-        end_yaw   = est_yaw(raw_path_xy, head=False)
+        # estimates the yaw at the start and end of the planned path
+        # (give dir of where it should face initially and at the end)
+        start_yaw = est_yaw(raw_path, head=True)
+        end_yaw = est_yaw(raw_path, head=False)
 
-        # build (or cache) the smoother once (e.g., after costmap arrives)
         smoothed = self.BezierSmoother_.smooth(
-            raw_pts=raw_path_xy,
-            offset_frac=0.3,            # expose as ROS param
-            samples_per_seg=10,         # spacing for your controller
-            start_yaw=start_yaw,        # or None if you don't want yaw bias
+            raw_pts=raw_path,
+            offset_frac=0.3,
+            samples_per_seg=10,
+            start_yaw=start_yaw,
             end_yaw=end_yaw,
-            yaw_bias=0.6
+            yaw_bias=1 # 0uses the automatic path tangent, 1 uses the yaw we supplied earlier
         )
 
-        # publish smoothed path
+        # Publish smoothed path
         msg_path = Path()
         msg_path.header.stamp = self.get_clock().now().to_msg()
         msg_path.header.frame_id = "map"
@@ -230,6 +251,108 @@ class Planner(Node):
             pose.pose.position.y = float(y)
             msg_path.poses.append(pose)
         self.pub_path_.publish(msg_path)
+        self.get_logger().info(
+            f"Path Found (Dijkstra + Bezier) from Rbt @ ({self.rbt_x_:7.3f}, {self.rbt_y_:7.3f}) to Goal @ ({self.goal_x_:7.3f},{self.goal_y_:7.3f})"
+        )
+
+        # -------- A* + Bezier Smoothing --------
+        # start_time = time.perf_counter()
+        # raw_path = self.AStarPlanner_.make_plan(
+        #     self.rbt_x_,
+        #     self.rbt_y_,
+        #     self.goal_x_,
+        #     self.goal_y_,
+        # )
+        # end_time = time.perf_counter()
+        # print(f"A* planning took {end_time - start_time:.4f} seconds.")
+        # 
+        # if len(raw_path) == 0:
+        #     self.get_logger().warn("No Path Found!")
+        #     self.has_new_request_ = False
+        #     return
+        # 
+        # # Apply Bezier smoothing
+        # def est_yaw(pts, head=True):
+        #     if len(pts) < 2: return None
+        #     a, b = (pts[0], pts[1]) if head else (pts[-2], pts[-1])
+        #     return atan2(b[1]-a[1], b[0]-a[0])
+        # 
+        # start_yaw = est_yaw(raw_path, head=True)
+        # end_yaw = est_yaw(raw_path, head=False)
+        # 
+        # smoothed = self.BezierSmoother_.smooth(
+        #     raw_pts=raw_path,
+        #     offset_frac=0.3,
+        #     samples_per_seg=10,
+        #     start_yaw=start_yaw,
+        #     end_yaw=end_yaw,
+        #     yaw_bias=0.6
+        # )
+        # 
+        # # Publish smoothed path
+        # msg_path = Path()
+        # msg_path.header.stamp = self.get_clock().now().to_msg()
+        # msg_path.header.frame_id = "map"
+        # for (x, y) in smoothed:
+        #     pose = PoseStamped()
+        #     pose.pose.position.x = float(x)
+        #     pose.pose.position.y = float(y)
+        #     msg_path.poses.append(pose)
+        # self.pub_path_.publish(msg_path)
+        # self.get_logger().info(
+        #     f"Path Found (A* + Bezier) from Rbt @ ({self.rbt_x_:7.3f}, {self.rbt_y_:7.3f}) to Goal @ ({self.goal_x_:7.3f},{self.goal_y_:7.3f})"
+        # )
+
+        # -------- FastRRTStar + Bezier Smoothing --------
+        # start_time = time.perf_counter()
+        # path = self.FRRTStarPlanner_.make_plan(
+        #     self.rbt_x_,
+        #     self.rbt_y_,
+        #     self.goal_x_,
+        #     self.goal_y_,
+        # )
+        # end_time = time.perf_counter()
+        # print(f"FastRRTStar planning took {end_time - start_time:.4f} seconds.")
+        # 
+        # if len(path) == 0:
+        #     self.get_logger().warn("No Path Found!")
+        #     self.has_new_request_ = False
+        #     return
+        # 
+        # # Convert RRT* nodes to (x,y) tuples
+        # raw_path = [(n.position_x, n.position_y) for n in path]
+        # 
+        # # Apply Bezier smoothing
+        # def est_yaw(pts, head=True):
+        #     if len(pts) < 2: return None
+        #     a, b = (pts[0], pts[1]) if head else (pts[-2], pts[-1])
+        #     return atan2(b[1]-a[1], b[0]-a[0])
+        # 
+        # start_yaw = est_yaw(raw_path, head=True)
+        # end_yaw = est_yaw(raw_path, head=False)
+        # 
+        # smoothed = self.BezierSmoother_.smooth(
+        #     raw_pts=raw_path,
+        #     offset_frac=0.3,
+        #     samples_per_seg=10,
+        #     start_yaw=start_yaw,
+        #     end_yaw=end_yaw,
+        #     yaw_bias=0.6
+        # )
+        # 
+        # # Publish smoothed path
+        # msg_path = Path()
+        # msg_path.header.stamp = self.get_clock().now().to_msg()
+        # msg_path.header.frame_id = "map"
+        # for (x, y) in smoothed:
+        #     pose = PoseStamped()
+        #     pose.pose.position.x = float(x)
+        #     pose.pose.position.y = float(y)
+        #     msg_path.poses.append(pose)
+        # self.pub_path_.publish(msg_path)
+        # self.get_logger().info(
+        #     f"Path Found (FastRRTStar + Bezier) from Rbt @ ({self.rbt_x_:7.3f}, {self.rbt_y_:7.3f}) to Goal @ ({self.goal_x_:7.3f},{self.goal_y_:7.3f})"
+        # )
 
         self.has_new_request_ = False
 
@@ -289,6 +412,73 @@ class Planner(Node):
     # Returns true if the cell column and cell row is outside the costmap.
     def outOfMap_(self, c, r):
         return c < 0 or c >= self.costmap_cols_ or r < 0 or r >= self.costmap_rows_
+
+    # Helper function: Returns path nodes from Dijkstra without publishing (for smoothing)
+    def _dijkstra_get_path(self, start_x, start_y, goal_x, goal_y):
+        # Initializations ---------------------------------
+        nodes = [
+            DijkstraNode(c, r)
+            for r in range(self.costmap_rows_)
+            for c in range(self.costmap_cols_)
+        ]
+
+        rbt_c, rbt_r = self.XYToCR_(start_x, start_y)
+        goal_c, goal_r = self.XYToCR_(goal_x, goal_y)
+        rbt_idx = self.CRToIndex_(rbt_c, rbt_r)
+        nodes[rbt_idx].g = 0
+        start_node = nodes[rbt_idx]
+
+        open_list = []
+        heappush(open_list, start_node)
+        visited = set()
+
+        # Expansion Loop ---------------------------------
+        while len(open_list) > 0:
+            node = heappop(open_list)
+
+            if self.CRToIndex_(node.c, node.r) in visited:
+                continue
+
+            visited.add(self.CRToIndex_(node.c, node.r))
+
+            # Return path if reached goal
+            if node.c == goal_c and node.r == goal_r:
+                path = []
+                while node.parent != None:
+                    path.append(node)
+                    node = node.parent
+                path.reverse()
+                return path
+
+            # Neighbor Loop
+            for dc, dr in [(1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)]:
+                nb_c = dc + node.c
+                nb_r = dr + node.r
+                nb_idx = self.CRToIndex_(nb_c, nb_r)
+
+                if self.outOfMap_(nb_c, nb_r):
+                    continue
+
+                nb_node = nodes[nb_idx]
+
+                if nb_idx in visited:
+                    continue
+
+                if self.costmap_[nb_idx] > self.max_access_cost_:
+                    continue
+
+                nb_x, nb_y = self.CRToXY_(nb_c, nb_r)
+                node_x, node_y = self.CRToXY_(node.c, node.r)
+                new_g = node.g + hypot(nb_x - node_x, nb_y - node_y) * (
+                    self.costmap_[nb_idx] + 1
+                )
+
+                if new_g < nb_node.g:
+                    nb_node.g = new_g
+                    nb_node.parent = node
+                    heappush(open_list, nb_node)
+
+        return []  # No path found
 
     # Runs the path planning algorithm based on the world coordinates.
     def dijkstra_(self, start_x, start_y, goal_x, goal_y):
