@@ -35,9 +35,27 @@ class Planner(Node):
 
         # Parameters: Declare
         self.declare_parameter("max_access_cost", int(100))
+        
+        # Bezier smoothing parameters
+        self.declare_parameter("bezier_offset_frac", float(0.3))
+        self.declare_parameter("bezier_samples_per_seg", int(10))
+        self.declare_parameter("bezier_yaw_bias", float(0.6))
+        self.declare_parameter("bezier_target_spacing", float(0.04))
+        self.declare_parameter("bezier_max_points", int(800))
+        self.declare_parameter("bezier_downsample_min_dist", float(0.5))
+        self.declare_parameter("bezier_downsample_angle_thresh", float(45.0))
 
         # Parameters: Get Values
         self.max_access_cost_ = self.get_parameter("max_access_cost").value
+        
+        # Bezier parameters
+        self.bezier_offset_frac_ = self.get_parameter("bezier_offset_frac").value
+        self.bezier_samples_per_seg_ = self.get_parameter("bezier_samples_per_seg").value
+        self.bezier_yaw_bias_ = self.get_parameter("bezier_yaw_bias").value
+        self.bezier_target_spacing_ = self.get_parameter("bezier_target_spacing").value
+        self.bezier_max_points_ = self.get_parameter("bezier_max_points").value
+        self.bezier_downsample_min_dist_ = self.get_parameter("bezier_downsample_min_dist").value
+        self.bezier_downsample_angle_thresh_ = self.get_parameter("bezier_downsample_angle_thresh").value
 
         # Handles: Topic Subscribers
         # Global costmap subscriber
@@ -234,11 +252,15 @@ class Planner(Node):
 
         smoothed = self.BezierSmoother_.smooth(
             raw_pts=raw_path,
-            offset_frac=0.3,
-            samples_per_seg=10,
+            offset_frac=self.bezier_offset_frac_,
+            samples_per_seg=self.bezier_samples_per_seg_,
             start_yaw=start_yaw,
             end_yaw=end_yaw,
-            yaw_bias=1 # 0uses the automatic path tangent, 1 uses the yaw we supplied earlier
+            yaw_bias=self.bezier_yaw_bias_,
+            target_spacing=self.bezier_target_spacing_,
+            max_points=self.bezier_max_points_,
+            min_dist=self.bezier_downsample_min_dist_,
+            angle_thresh_deg=self.bezier_downsample_angle_thresh_
         )
 
         # Publish smoothed path
@@ -282,11 +304,15 @@ class Planner(Node):
         # 
         # smoothed = self.BezierSmoother_.smooth(
         #     raw_pts=raw_path,
-        #     offset_frac=0.3,
-        #     samples_per_seg=10,
+        #     offset_frac=self.bezier_offset_frac_,
+        #     samples_per_seg=self.bezier_samples_per_seg_,
         #     start_yaw=start_yaw,
         #     end_yaw=end_yaw,
-        #     yaw_bias=0.6
+        #     yaw_bias=self.bezier_yaw_bias_,
+        #     target_spacing=self.bezier_target_spacing_,
+        #     max_points=self.bezier_max_points_,
+        #     min_dist=self.bezier_downsample_min_dist_,
+        #     angle_thresh_deg=self.bezier_downsample_angle_thresh_
         # )
         # 
         # # Publish smoothed path
@@ -333,11 +359,15 @@ class Planner(Node):
         # 
         # smoothed = self.BezierSmoother_.smooth(
         #     raw_pts=raw_path,
-        #     offset_frac=0.3,
-        #     samples_per_seg=10,
+        #     offset_frac=self.bezier_offset_frac_,
+        #     samples_per_seg=self.bezier_samples_per_seg_,
         #     start_yaw=start_yaw,
         #     end_yaw=end_yaw,
-        #     yaw_bias=0.6
+        #     yaw_bias=self.bezier_yaw_bias_,
+        #     target_spacing=self.bezier_target_spacing_,
+        #     max_points=self.bezier_max_points_,
+        #     min_dist=self.bezier_downsample_min_dist_,
+        #     angle_thresh_deg=self.bezier_downsample_angle_thresh_
         # )
         # 
         # # Publish smoothed path

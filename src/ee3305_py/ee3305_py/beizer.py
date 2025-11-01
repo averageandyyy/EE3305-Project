@@ -32,6 +32,14 @@ class BezierSmoother:
         return v / n if n > 1e-9 else v
 
     def _downsample_path(self, pts, min_dist=0.5, angle_thresh_deg=60.0):
+        """
+        Downsample path by removing points that are too close or don't have significant turns.
+        
+        Args:
+            pts: list of (x,y) tuples
+            min_dist: minimum distance between kept points (meters)
+            angle_thresh_deg: minimum turn angle to keep a point (degrees)
+        """
         if len(pts) <= 2:
             return pts[:]
         out = [pts[0]]
@@ -96,16 +104,32 @@ class BezierSmoother:
     
     # offset frac (0.2-0.4) controls how "tight" the curve is, but risk collision
     # samples_per_seg controls smoothness for each segment (how dense, 50-120)
-    def smooth(self, raw_pts, offset_frac=0.5, samples_per_seg=10,
-               start_yaw=None, end_yaw=None, yaw_bias=None, target_spacing=0.04, max_points=800):
+    def smooth(self, raw_pts, offset_frac=0.3, samples_per_seg=10,
+               start_yaw=None, end_yaw=None, yaw_bias=0.6, 
+               target_spacing=0.04, max_points=800,
+               min_dist=0.5, angle_thresh_deg=60.0):
         """
-        raw_pts: list[(x,y)] polyline from A*/Dijkstra/RRT*
-        returns: list[(x,y)] smoothed polyline (or raw if smoothing collides)
+        Apply Bezier curve smoothing to a raw path.
+        
+        Args:
+            raw_pts: list[(x,y)] polyline from A*/Dijkstra/RRT*
+            offset_frac: controls curve tightness (0.2-0.4), higher = smoother but more collision risk
+            samples_per_seg: number of samples per bezier segment (affects curve density)
+            start_yaw: optional starting yaw angle (radians)
+            end_yaw: optional ending yaw angle (radians)
+            yaw_bias: how much to bias toward start/end yaw (0=ignore, 1=full bias)
+            target_spacing: target spacing between output points (meters)
+            max_points: maximum number of points in output path
+            min_dist: minimum distance for downsampling (meters)
+            angle_thresh_deg: minimum angle for downsampling (degrees)
+            
+        Returns:
+            list[(x,y)] smoothed polyline (or raw if smoothing collides)
         """
         if len(raw_pts) < 3:
             return raw_pts[:]
         # tune angle_thresh_dist (increase if want fewer anchor points, smoother)
-        key = self._downsample_path(raw_pts, min_dist=0.5, angle_thresh_deg=60)
+        key = self._downsample_path(raw_pts, min_dist=min_dist, angle_thresh_deg=angle_thresh_deg)
         if len(key) < 3:
             return raw_pts[:]
 
