@@ -24,7 +24,7 @@ class BezierSmoother:
         if not self._in_map(c, r):
             return False
         idx = r * self.cols_ + c
-        return self.costmap_[idx] <= self.max_cost_
+        return self.costmap_[idx] < self.max_cost_
 
     # --- small utilities ---
     def _unit(self, v):
