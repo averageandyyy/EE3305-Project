@@ -33,8 +33,9 @@ class FastRRTStarPlanner:
         expansion_radius: float = 5.0,
         search_radius: float = 2.0,
         dichotomy_distance: float = 0.05,
-        tolerance_distance: float = 0.25,
+        tolerance_distance: float = 0.1,
         use_costmap=True,
+        goal_frequency: float = 0.2,
     ):
         self.costmap_ = costmap
         self.costmap_origin_x_ = origin_x
@@ -50,6 +51,7 @@ class FastRRTStarPlanner:
         self.dichotomy_distance_ = dichotomy_distance
         self.tolerance_distance_ = tolerance_distance
         self.use_costmap_ = use_costmap
+        self.goal_frequency_ = goal_frequency
 
         self.start_x = None
         self.start_y = None
@@ -69,6 +71,12 @@ class FastRRTStarPlanner:
         )
 
     def sample_free_node(self):
+        # With probability goal_frequency_, sample the goal directly
+        if random.uniform(0.0, 1.0) < self.goal_frequency_:
+            # print("Sampling goal node directly")
+            return Node(self.goal_x, self.goal_y)
+        
+        # print("Sampling random node")
         return Node(
             random.uniform(self.x_lower_bound, self.x_upper_bound),
             random.uniform(self.y_lower_bound, self.y_upper_bound),
