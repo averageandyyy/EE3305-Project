@@ -123,7 +123,7 @@ class FastRRTStarPlanner:
                 or row >= self.costmap_rows_
             ):
                 return False
-            if self.costmap_[row * self.costmap_cols_ + col] > self.max_access_cost_:
+            if self.costmap_[row * self.costmap_cols_ + col] >= self.max_access_cost_:
                 return False
         return True
 
@@ -221,7 +221,9 @@ class FastRRTStarPlanner:
     def steer(self, nearest_node: Node, candidate_node: Node) -> Node:
         # Steer candidate_node to be within expansion_radius_ of nearest_node
         # Modifies candidate_node in place
-        if self.distance(nearest_node, candidate_node) <= self.expansion_radius_:
+        if self.distance(nearest_node, candidate_node) <= self.expansion_radius_ and self.is_collision_free(
+            nearest_node, candidate_node
+        ):
             cost_multiplier = self.get_cost_multiplier(candidate_node)
             candidate_node.update_parent_and_cost(nearest_node, cost_multiplier)
             return
@@ -243,8 +245,17 @@ class FastRRTStarPlanner:
         last_point_collision_free = self.is_collision_free(self.nodes[-1], goal_node)
 
         # The original F-RRT* checks for the entire path to be collision-free but we skip for now
+        # Verify entire path is collision-free
+        path_collision_free = True
+        node_n = self.nodes[-1]
+        while node_n.parent is not None:
+            if not self.is_collision_free(node_n, node_n.parent):
+                path_collision_free = False
+                break
+            node_n = node_n.parent
+    
+        return within_goal_threshold and last_point_collision_free and path_collision_free
 
-        return within_goal_threshold and last_point_collision_free
 
     def rewire(self, candidate_node: Node, nearby_nodes_indices: list[int]):
         for index in nearby_nodes_indices:
@@ -266,6 +277,7 @@ class FastRRTStarPlanner:
     def make_plan(
         self, start_x: float, start_y: float, goal_x: float, goal_y: float
     ) -> list[Node]:
+        start_time = time.perf_counter()
         self.start_x = start_x
         self.start_y = start_y
         self.goal_x = goal_x
@@ -289,6 +301,12 @@ class FastRRTStarPlanner:
             # Sample free node
             candidate_node = self.sample_free_node()
 
+            # Check if candidate node is on collision cell
+            c, r = self.world_to_map(candidate_node.position_x, candidate_node.position_y)
+            idx = r * self.costmap_cols_ + c
+            if self.costmap_[idx] >= self.max_access_cost_:
+                continue
+
             # Get nearest node
             nearest_node_index = self.get_nearest_node(candidate_node)
             nearest_node = self.nodes[nearest_node_index]
@@ -300,6 +318,16 @@ class FastRRTStarPlanner:
                 nearby_nodes_indices = self.get_nearby_nodes(candidate_node)
                 reachest_node = self.find_reachest(nearest_node, candidate_node)
                 create_node = self.create_node(reachest_node, candidate_node)
+
+                # BUG: In the original C++ implementation, they merely warn if the created node is in collision, but still proceed to use it.
+                if create_node is not None:
+                    # Actually verify collisions (C++ only warns but proceeds anyway)
+                    if not self.is_collision_free(create_node, reachest_node.parent):
+                        # Don't use create_node, fall back to direct connection
+                        create_node = None
+                    elif not self.is_collision_free(candidate_node, create_node):
+                        # Don't use create_node, fall back to direct connection
+                        create_node = None
 
                 if create_node is not None:
                     create_node_cost_multiplier = self.get_cost_multiplier(create_node)
@@ -322,6 +350,12 @@ class FastRRTStarPlanner:
                     candidate_node_cost_multiplier = self.get_cost_multiplier(
                         candidate_node
                     )
+
+                    # Actually verify collisions (C++ only warns but proceeds anyway)
+                    if not self.is_collision_free(candidate_node, reachest_node):
+                        # Fallback to nearest_node if reachest_node is in collision
+                        reachest_node = nearest_node
+
                     candidate_node.update_parent_and_cost(
                         reachest_node,
                         candidate_node_cost_multiplier,
@@ -345,12 +379,17 @@ class FastRRTStarPlanner:
                 )  # We can use the "old" indices because candidate_node is added at the end of self.nodes
 
         if self.path_found:
+            end_time = time.perf_counter()
+            print(f"Fast-RRT* planning took {end_time - start_time:.4f} seconds. with {len(self.nodes)} nodes.")
             path = []
             node = self.best_end_node
+
             while node is not None:
                 path.append(node)
                 node = node.parent
             path.reverse()
+
+            print(f"Path found with {len(path)} nodes and cost {self.best_path_cost:.4f}.")
             return path
 
         return []
