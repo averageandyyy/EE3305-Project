@@ -1,4 +1,5 @@
 from heapq import heappop, heappush
+import time
 
 
 class AStarPlanner:
@@ -9,7 +10,7 @@ class AStarPlanner:
     # Directions for 4-connectivity (up, right, down, left)
     DIRECTIONS = [(0, 1), (1, 0), (0, -1), (-1, 0)]
     # Adding diagonal directions for A* to find smoother paths
-    DIRECTIONS_8 = DIRECTIONS + [(1, 1), (1, -1), (-1, 1), (-1, -1)]
+    # DIRECTIONS_8 = DIRECTIONS + [(1, 1), (1, -1), (-1, 1), (-1, -1)]
 
     def __init__(
         self,
@@ -76,10 +77,11 @@ class AStarPlanner:
 
         def heuristic(a: tuple[int, int], b: tuple[int, int]) -> float:
             # Manhattan distance in map coordinates
-            # return abs(a[0] - b[0]) + abs(a[1] - b[1])
+            return abs(a[0] - b[0]) + abs(a[1] - b[1])
             # Euclidean distance in world coordinates
-            return self.world_distance(a, b)
+            # return self.world_distance(a, b)
 
+        start_time = time.perf_counter()
         path_found = False
         self.start_x_map, self.start_y_map = self.world_to_map(start_x, start_y)
         self.goal_x_map, self.goal_y_map = self.world_to_map(goal_x, goal_y)
@@ -109,17 +111,25 @@ class AStarPlanner:
         )
 
         open_set_hash = {(self.start_x_map, self.start_y_map)}
+        visited_nodes = set()
 
         while open_set:
             _, current = heappop(open_set)
-            open_set_hash.remove(current)
+            if current in visited_nodes:
+                continue
+            visited_nodes.add(current)
+            # open_set_hash.remove(current)
 
             if current == (self.goal_x_map, self.goal_y_map):
                 path_found = True
                 break
 
-            for dc, dr in self.DIRECTIONS_8:
+            # for dc, dr in self.DIRECTIONS_8:
+            for dc, dr in self.DIRECTIONS:
                 neighbor = (current[0] + dc, current[1] + dr)
+
+                if neighbor in visited_nodes:
+                    continue
 
                 if not (
                     0 <= neighbor[0] < self.columns_ and 0 <= neighbor[1] < self.rows_
@@ -142,11 +152,12 @@ class AStarPlanner:
                         neighbor,
                         (self.goal_x_map, self.goal_y_map),
                     )
-                    if neighbor not in open_set_hash:
-                        heappush(open_set, (f_score[neighbor], neighbor))
-                        open_set_hash.add(neighbor)
+                    heappush(open_set, (f_score[neighbor], neighbor))
+                        # open_set_hash.add(neighbor)
 
         if path_found:
+            end_time = time.perf_counter()
+            print(f"A* planning took {end_time - start_time:.4f} seconds.")
             path = []
             current = (self.goal_x_map, self.goal_y_map)
             while current in came_from:
