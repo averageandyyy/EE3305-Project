@@ -157,7 +157,7 @@ class AStarPlanner:
 
         if path_found:
             end_time = time.perf_counter()
-            print(f"A* planning took {end_time - start_time:.4f} seconds.")
+            print(f"A* planning took {end_time - start_time:.4f} seconds with {len(visited_nodes)} visited nodes.")
             path = []
             current = (self.goal_x_map, self.goal_y_map)
             while current in came_from:

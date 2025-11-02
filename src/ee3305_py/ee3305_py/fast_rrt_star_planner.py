@@ -5,6 +5,7 @@ from scipy.spatial import KDTree
 
 from ee3305_py.bresenham import get_bresenham_line
 from ee3305_py.node import Node
+import time
 
 
 class FastRRTStarPlanner:
