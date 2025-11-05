@@ -331,6 +331,7 @@ class FastRRTStarPlanner:
                         create_node = None
 
                 if create_node is not None:
+                    # print("Using created node via dichotomy bisection")
                     create_node_cost_multiplier = self.get_cost_multiplier(create_node)
                     create_node.update_parent_and_cost(
                         reachest_node.parent,

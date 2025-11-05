@@ -137,7 +137,8 @@ class AStarPlanner:
                 path.reverse()
                 return [self.map_to_world(c, r) for c, r in path]
 
-            for dc, dr in self.DIRECTIONS:
+            # for dc, dr in self.DIRECTIONS:
+            for dc, dr in self.DIRECTIONS_8:
                 neighbor_c = current_node.c + dc
                 neighbor_r = current_node.r + dr
                 neighbor_index = self.map_to_index(neighbor_c, neighbor_r)
