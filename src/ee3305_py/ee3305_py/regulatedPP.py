@@ -1,4 +1,4 @@
-from math import atan2, cos, hypot, inf, sin, exp
+from math import atan2, cos, hypot, sin
 
 
 import rclpy
@@ -10,27 +10,33 @@ from rclpy.node import Node
 
 
 class Controller(Node):
-
-
-    def __init__(self, node_name="regulated_pure_pursuit"):
+    def __init__(self, node_name="adaptive_pure_pursuit"):
         super().__init__(node_name)
 
 
-        # Parameters: Declare ============================================================
-        self.declare_parameter("frequency", float(20))
-        self.declare_parameter("lookahead_distance", float(0.3))
-        self.declare_parameter("base_lin_vel", float(0.3))
-        self.declare_parameter("max_lin_vel", float(0.3))
-        self.declare_parameter("max_ang_vel", float(2.0))
-        self.declare_parameter("stop_thres", float(0.15))
-        self.declare_parameter("curvature_slowdown_gain", float(0.8))
-        self.declare_parameter("goal_slowdown_distance", float(0.5))
+        # Parameters
+        self.declare_parameter("frequency", 20.0)
+
+
+        # ✅ Adaptive lookahead settings
+        self.declare_parameter("min_lookahead", 0.3)     # smallest lookahead (m)
+        self.declare_parameter("max_lookahead", 0.5)     # largest lookahead (m)
+        self.declare_parameter("lookahead_gain", 1.0)    # scaling factor * speed
+
+
+        self.declare_parameter("base_lin_vel", 0.5)
+        self.declare_parameter("max_lin_vel", 0.5)
+        self.declare_parameter("max_ang_vel", 2.0)
+        self.declare_parameter("stop_thres", 0.15)
+        self.declare_parameter("curvature_slowdown_gain", 0.8)
+        self.declare_parameter("goal_slowdown_distance", 0.5)
         self.declare_parameter("enable_debug_log", False)
 
 
-        # Parameters: Get Values
         self.frequency_ = self.get_parameter("frequency").value
-        self.lookahead_distance_ = self.get_parameter("lookahead_distance").value
+        self.min_ld_ = self.get_parameter("min_lookahead").value
+        self.max_ld_ = self.get_parameter("max_lookahead").value
+        self.ld_gain_ = self.get_parameter("lookahead_gain").value
         self.base_lin_vel_ = self.get_parameter("base_lin_vel").value
         self.max_lin_vel_ = self.get_parameter("max_lin_vel").value
         self.max_ang_vel_ = self.get_parameter("max_ang_vel").value
@@ -40,35 +46,27 @@ class Controller(Node):
         self.enable_debug_log_ = self.get_parameter("enable_debug_log").value
 
 
-        # Subscribers ============================================================
+        # Subscriptions & publishers
         self.sub_path_ = self.create_subscription(Path, "path", self.callbackSubPath_, 10)
         self.sub_odom_ = self.create_subscription(Odometry, "odom", self.callbackSubOdom_, 10)
-
-
-        # Publishers ============================================================
         self.pub_cmd_vel_ = self.create_publisher(TwistStamped, "cmd_vel", 10)
         self.pub_lookahead_ = self.create_publisher(PoseStamped, "lookahead", 10)
 
 
-        # Timer ============================================================
         self.timer = self.create_timer(1.0 / self.frequency_, self.callbackTimer_)
 
 
-        # State Variables ============================================================
+        # State
         self.received_path_ = False
         self.received_odom_ = False
         self.path_poses_ = []
 
 
-    # =========================================================================
-    # CALLBACKS
-    # =========================================================================
+    # -------------------- Callbacks --------------------------------
     def callbackSubPath_(self, msg: Path):
-        if len(msg.poses) == 0:
+        if not msg.poses:
             self.get_logger().warn("Received empty path!")
             return
-
-
         self.path_poses_ = msg.poses.copy()
         self.received_path_ = True
         self.get_logger().info(f"Received path with {len(self.path_poses_)} poses")
@@ -83,19 +81,26 @@ class Controller(Node):
         siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
         cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
         self.rbt_yaw_ = atan2(siny_cosp, cosy_cosp)
+
+
+        # ✅ Robot's forward speed (used for adaptive lookahead)
+        self.rbt_speed_ = msg.twist.twist.linear.x
         self.received_odom_ = True
 
 
-    # =========================================================================
-    # PURE PURSUIT LOGIC
-    # =========================================================================
+    # -------------------- Adaptive Lookahead (only change here) ----
+    def computeAdaptiveLookahead_(self):
+        Ld = self.min_ld_ + self.ld_gain_ * abs(self.rbt_speed_)
+        return max(self.min_ld_, min(self.max_ld_, Ld))
+
+
     def getLookaheadPoint_(self):
         if not self.path_poses_:
             return None, None
 
 
-        # find closest point
-        closest_dist = inf
+        # 1. Find closest path point
+        closest_dist = float("inf")
         closest_idx = 0
         for i, pose in enumerate(self.path_poses_):
             px = pose.pose.position.x
@@ -106,13 +111,17 @@ class Controller(Node):
                 closest_idx = i
 
 
-        # find lookahead
+        # 2. Use adaptive lookahead distance
+        target_ld = self.computeAdaptiveLookahead_()
+
+
+        # 3. Find first point at or beyond lookahead distance
         lookahead_idx = len(self.path_poses_) - 1
         for i in range(closest_idx, len(self.path_poses_)):
             px = self.path_poses_[i].pose.position.x
             py = self.path_poses_[i].pose.position.y
             d = hypot(px - self.rbt_x_, py - self.rbt_y_)
-            if d >= self.lookahead_distance_:
+            if d >= target_ld:
                 lookahead_idx = i
                 break
 
@@ -122,6 +131,7 @@ class Controller(Node):
         ly = pose.pose.position.y
 
 
+        # Publish lookahead point for visualization
         msg = PoseStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = "map"
@@ -133,24 +143,27 @@ class Controller(Node):
         return lx, ly
 
 
+    # -------------------- Main Controller Loop ----------------------
     def callbackTimer_(self):
-        if not self.received_path_ or not self.received_odom_:
+        if not (self.received_path_ and self.received_odom_):
             return
 
 
-        lookahead_x, lookahead_y = self.getLookaheadPoint_()
-        if lookahead_x is None:
+        lx, ly = self.getLookaheadPoint_()
+        if lx is None:
             return
 
 
-        dx = lookahead_x - self.rbt_x_
-        dy = lookahead_y - self.rbt_y_
+        # Transform target to robot frame
+        dx = lx - self.rbt_x_
+        dy = ly - self.rbt_y_
         local_x = dx * cos(self.rbt_yaw_) + dy * sin(self.rbt_yaw_)
         local_y = -dx * sin(self.rbt_yaw_) + dy * cos(self.rbt_yaw_)
+
+
         dist = hypot(local_x, local_y)
 
 
-        # stop condition
         if dist < self.stop_thres_:
             lin_vel = 0.0
             ang_vel = 0.0
@@ -158,6 +171,8 @@ class Controller(Node):
             # curvature (avoid division by zero)
             denom = max(1e-6, local_x ** 2 + local_y ** 2)
             curvature = (2.0 * local_y) / denom
+
+
 
 
             # === Velocity Regulation ===
@@ -170,22 +185,25 @@ class Controller(Node):
             goal_factor = min(1.0, dist_to_goal / self.goal_slowdown_distance_)
 
 
+
+
             lin_vel = self.base_lin_vel_ * curve_factor * goal_factor
             lin_vel = min(lin_vel, self.max_lin_vel_)
 
 
-            # angular velocity from curvature
+
+
+            # angular velocity from curvature            
             ang_vel = curvature * lin_vel
             ang_vel = max(-self.max_ang_vel_, min(self.max_ang_vel_, ang_vel))
 
 
-        # publish command
-        msg = TwistStamped()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = "base_link"
-        msg.twist.linear.x = lin_vel
-        msg.twist.angular.z = ang_vel
-        self.pub_cmd_vel_.publish(msg)
+        cmd = TwistStamped()
+        cmd.header.stamp = self.get_clock().now().to_msg()
+        cmd.header.frame_id = "base_link"
+        cmd.twist.linear.x = lin_vel
+        cmd.twist.angular.z = ang_vel
+        self.pub_cmd_vel_.publish(cmd)
 
 
         if self.enable_debug_log_:
@@ -194,11 +212,6 @@ class Controller(Node):
             )
 
 
-
-
-# =========================================================================
-# MAIN
-# =========================================================================
 def main(args=None):
     rclpy.init(args=args)
     rclpy.spin(Controller())
