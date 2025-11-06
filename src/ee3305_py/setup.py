@@ -22,7 +22,7 @@ setup(
         'console_scripts': [
             'behavior = ee3305_py.behavior:main',
             'planner = ee3305_py.planner:main',
-            'controller = ee3305_py.controller:main',
+            'controller = ee3305_py.regulatedPP:main',
         ],
     },
 )

@@ -18,8 +18,8 @@ class Controller(Node):
 
         # Parameters: Declare ============================================================
         self.declare_parameter("frequency", float(20))
-        self.declare_parameter("lookahead_distance", float(0.4))
-        self.declare_parameter("base_lin_vel", float(0.15))
+        self.declare_parameter("lookahead_distance", float(0.3))
+        self.declare_parameter("base_lin_vel", float(0.3))
         self.declare_parameter("max_lin_vel", float(0.3))
         self.declare_parameter("max_ang_vel", float(2.0))
         self.declare_parameter("stop_thres", float(0.15))
