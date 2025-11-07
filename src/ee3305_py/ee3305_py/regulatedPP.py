@@ -19,19 +19,24 @@ class Controller(Node):
 
 
         # ✅ Adaptive lookahead settings
-        self.declare_parameter("min_lookahead", 0.2)     # smallest lookahead (m)
+        self.declare_parameter("min_lookahead", 0.3)     # smallest lookahead (m)
         self.declare_parameter("max_lookahead", 1.0)     # largest lookahead (m)
-        self.declare_parameter("lookahead_gain", 1)    # scaling factor * speed
+        self.declare_parameter("lookahead_gain", 1.0)    # scaling factor * speed
 
 
         self.declare_parameter("base_lin_vel", 0.4)
         self.declare_parameter("max_lin_vel", 0.6)
         self.declare_parameter("max_ang_vel", 2.0)
-        self.declare_parameter("stop_thres", 0.15)
-        self.declare_parameter("curvature_slowdown_gain", 1) # the higher the more slowdown
-        self.declare_parameter("goal_slowdown_distance", 0.5) # the higher the closer the robot slow down
+        self.declare_parameter("stop_thres", 0.05)
+        self.declare_parameter("curvature_slowdown_gain", 0.8) # the higher the more slowdown
+        self.declare_parameter("goal_slowdown_distance", 0.2) # the higher the closer the robot slow down
         self.declare_parameter("enable_debug_log", False)
 
+        self.declare_parameter("rotate_threshold", 0.785)      # 45 deg
+
+        self.declare_parameter("rotate_tolerance", 0.5)       # stop rotating if 11 deg
+        self.declare_parameter("rotate_speed", 0.5)            # rad/s
+        self.declare_parameter("rotate_gain", 1)             # angular speed scaling factor
 
         self.frequency_ = self.get_parameter("frequency").value
         self.min_ld_ = self.get_parameter("min_lookahead").value
@@ -44,7 +49,10 @@ class Controller(Node):
         self.curvature_slowdown_gain_ = self.get_parameter("curvature_slowdown_gain").value
         self.goal_slowdown_distance_ = self.get_parameter("goal_slowdown_distance").value
         self.enable_debug_log_ = self.get_parameter("enable_debug_log").value
-
+        self.rotate_threshold_ = self.get_parameter("rotate_threshold").value
+        self.rotate_tolerance_ = self.get_parameter("rotate_tolerance").value
+        self.rotate_speed_ = self.get_parameter("rotate_speed").value
+        self.rotate_gain_ = self.get_parameter("rotate_gain").value
 
         # Subscriptions & publishers
         self.sub_path_ = self.create_subscription(Path, "path", self.callbackSubPath_, 10)
@@ -71,6 +79,10 @@ class Controller(Node):
         self.received_path_ = True
         self.get_logger().info(f"Received path with {len(self.path_poses_)} poses")
 
+        goal_pose = self.path_poses_[-1].pose
+        # extract orientation quaternion
+        q = goal_pose.orientation
+        self.goal_yaw = atan2(2*(q.w*q.z + q.x*q.y), 1 - 2*(q.y*q.y + q.z*q.z))
 
     def callbackSubOdom_(self, msg: Odometry):
         self.rbt_x_ = msg.pose.pose.position.x
@@ -163,39 +175,54 @@ class Controller(Node):
 
         dist = hypot(local_x, local_y)
 
-
+        #heading_error = atan2(local_y, local_x)
+        PP_heading_error = atan2(local_y, local_x)
+        goal_heading_error = atan2(sin(self.goal_yaw- self.rbt_yaw_), cos(self.goal_yaw - self.rbt_yaw_))
+   
         if dist < self.stop_thres_:
+            PP_heading_error = goal_heading_error
+            # reach goal → rotate on the spot
             lin_vel = 0.0
-            ang_vel = 0.0
-        else:
-            # curvature (avoid division by zero)
-            denom = max(1e-6, local_x ** 2 + local_y ** 2)
-            curvature = (2.0 * local_y) / denom
 
-
-
-
-            # === Velocity Regulation ===
-            # base speed reduced by curvature and goal proximity
-            curve_factor = 1.0 / (1.0 + self.curvature_slowdown_gain_ * abs(curvature))
-            dist_to_goal = hypot(
-                self.path_poses_[-1].pose.position.x - self.rbt_x_,
-                self.path_poses_[-1].pose.position.y - self.rbt_y_,
-            )
-            goal_factor = min(1.0, dist_to_goal / self.goal_slowdown_distance_)
-
-
-
-
-            lin_vel = self.base_lin_vel_ * curve_factor * goal_factor
-            lin_vel = min(lin_vel, self.max_lin_vel_)
-
-
-
-
-            # angular velocity from curvature            
-            ang_vel = curvature * lin_vel
+            # Angular velocity proportional to heading_error, limited by max_ang_vel_
+            ang_vel = self.rotate_gain_ * PP_heading_error
             ang_vel = max(-self.max_ang_vel_, min(self.max_ang_vel_, ang_vel))
+
+            #Hard stop when extremely close (avoid tiny oscillations)
+            if abs(PP_heading_error) < 0.05:  # ~4 degrees
+                ang_vel = 0.0
+
+        else:
+            if abs(PP_heading_error) < 0.785:  # 45 degrees
+                # curvature (avoid division by zero)
+                denom = max(1e-6, local_x ** 2 + local_y ** 2)
+                curvature = (2.0 * local_y) / denom
+
+                # === Velocity Regulation ===
+                # base speed reduced by curvature and goal proximity
+                curve_factor = 1.0 / (1.0 + self.curvature_slowdown_gain_ * abs(curvature))
+                dist_to_goal = hypot(
+                    self.path_poses_[-1].pose.position.x - self.rbt_x_,
+                    self.path_poses_[-1].pose.position.y - self.rbt_y_,
+                )
+                goal_factor = min(1.0, dist_to_goal / self.goal_slowdown_distance_)
+
+                lin_vel = self.base_lin_vel_ * curve_factor * goal_factor
+                lin_vel = min(lin_vel, self.max_lin_vel_)
+                # angular velocity from curvature            
+                ang_vel = curvature * lin_vel
+                ang_vel = max(-self.max_ang_vel_, min(self.max_ang_vel_, ang_vel))
+            else:
+                # Too far off heading → rotate on the spot
+                lin_vel = 0.0
+
+                # Angular velocity proportional to heading_error, limited by max_ang_vel_
+                ang_vel = self.rotate_gain_ * PP_heading_error
+                ang_vel = max(-self.max_ang_vel_, min(self.max_ang_vel_, ang_vel))
+
+                # hard stop when extremely close (avoid tiny oscillations)
+                if abs(PP_heading_error) < 0.05:  # ~4 degrees
+                    ang_vel = 0.0
 
 
         cmd = TwistStamped()

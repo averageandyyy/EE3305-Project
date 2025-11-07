@@ -1,5 +1,5 @@
 from heapq import heappop, heappush
-from math import floor, hypot, inf
+from math import floor, hypot, inf, atan2, cos, sin
 
 import rclpy
 from geometry_msgs.msg import PoseStamped
@@ -225,6 +225,13 @@ class Planner(Node):
                         node.r,
                     )
                     msg_path.poses.append(pose)
+                
+                if len(msg_path.poses) > 0:
+                    yaw = atan2(goal_y - start_y, goal_x - start_x)  # or your desired goal orientation
+                    msg_path.poses[-1].pose.orientation.x = 0.0
+                    msg_path.poses[-1].pose.orientation.y = 0.0
+                    msg_path.poses[-1].pose.orientation.z = sin(yaw / 2.0)
+                    msg_path.poses[-1].pose.orientation.w = cos(yaw / 2.0)
 
                 # publish path
                 self.pub_path_.publish(msg_path)
