@@ -19,17 +19,17 @@ class Controller(Node):
 
 
         # ✅ Adaptive lookahead settings
-        self.declare_parameter("min_lookahead", 0.3)     # smallest lookahead (m)
-        self.declare_parameter("max_lookahead", 0.5)     # largest lookahead (m)
-        self.declare_parameter("lookahead_gain", 1.0)    # scaling factor * speed
+        self.declare_parameter("min_lookahead", 0.2)     # smallest lookahead (m)
+        self.declare_parameter("max_lookahead", 1.0)     # largest lookahead (m)
+        self.declare_parameter("lookahead_gain", 1)    # scaling factor * speed
 
 
-        self.declare_parameter("base_lin_vel", 0.5)
-        self.declare_parameter("max_lin_vel", 0.5)
+        self.declare_parameter("base_lin_vel", 0.4)
+        self.declare_parameter("max_lin_vel", 0.6)
         self.declare_parameter("max_ang_vel", 2.0)
         self.declare_parameter("stop_thres", 0.15)
-        self.declare_parameter("curvature_slowdown_gain", 0.8)
-        self.declare_parameter("goal_slowdown_distance", 0.5)
+        self.declare_parameter("curvature_slowdown_gain", 1) # the higher the more slowdown
+        self.declare_parameter("goal_slowdown_distance", 0.5) # the higher the closer the robot slow down
         self.declare_parameter("enable_debug_log", False)
 
 
