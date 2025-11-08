@@ -19,8 +19,11 @@ class DWALocalPlanner:
         linear_velocity_resolution: float = 0.02,
         angular_velocity_resolution: float = 0.2,
         time_horizon: float = 2.0,
-        horizon_reduction_factor: float = 0.2,
         goal_tolerance: float = 0.1,
+        goal_weight: float = 1.0,
+        heading_weight: float = 0.1,
+        speed_weight: float = 0.1,
+        obstacle_weight: float = 5.0,
     ):
         self.max_linear_velocity = max_linear_velocity
         self.max_angular_velocity = max_angular_velocity
@@ -30,8 +33,11 @@ class DWALocalPlanner:
         self.linear_velocity_resolution = linear_velocity_resolution
         self.angular_velocity_resolution = angular_velocity_resolution
         self.time_horizon = time_horizon
-        self.horizon_reduction_factor = horizon_reduction_factor
         self.goal_tolerance = goal_tolerance
+        self.goal_weight = goal_weight
+        self.heading_weight = heading_weight
+        self.speed_weight = speed_weight
+        self.obstacle_weight = obstacle_weight
 
         # Robot state in world frame
         self.current_x = None
@@ -276,10 +282,15 @@ class DWALocalPlanner:
                     trajectory
                 )  # Average cost per step
 
-                goal_cost = self.get_goal_cost(trajectory, goal_x, goal_y) * 1.0
-                speed_cost = self.get_speed_cost(v, w) * 0.1
-                heading_cost = self.get_heading_cost(trajectory, goal_x, goal_y) * 0.1
-                collision_cost = collision_cost * 10.0
+                goal_cost = (
+                    self.get_goal_cost(trajectory, goal_x, goal_y) * self.goal_weight
+                )
+                speed_cost = self.get_speed_cost(v, w) * self.speed_weight
+                heading_cost = (
+                    self.get_heading_cost(trajectory, goal_x, goal_y)
+                    * self.heading_weight
+                )
+                collision_cost = collision_cost * self.obstacle_weight
 
                 total_cost = goal_cost + speed_cost + heading_cost + collision_cost
 
