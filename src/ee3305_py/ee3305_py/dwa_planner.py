@@ -78,24 +78,8 @@ class DWALocalPlanner:
             if self.costmap[index] >= self.max_access_cost:
                 return -1  # Collision detected
 
-            cost += self.costmap[index]
+            cost += self.costmap[index] / 99  # Normalize cost by max cost of 99
         return cost
-
-    def get_adaptive_time_horizon(
-        self,
-        goal_x: float,
-        goal_y: float,
-    ) -> float:
-        distance_to_goal = (
-            (self.current_x - goal_x) ** 2 + (self.current_y - goal_y) ** 2
-        ) ** 0.5
-
-        # If within 2x goal tolerance, use minimal horizon
-        if distance_to_goal < 1.5 * self.goal_tolerance:  # Note the magic number here
-            return self.horizon_reduction_factor * self.time_horizon
-
-        # Otherwise use full horizon
-        return self.time_horizon
 
     def get_heading_cost(
         self,
@@ -203,8 +187,6 @@ class DWALocalPlanner:
         linear_velocity: float,
         angular_velocity: float,
         time_horizon: float,
-        goal_x: float,
-        goal_y: float,
     ):
         x = self.current_x
         y = self.current_y
@@ -223,12 +205,6 @@ class DWALocalPlanner:
                 yaw -= 2 * pi
             elif yaw < -pi:
                 yaw += 2 * pi
-
-            # distance_to_goal = ((x - goal_x) ** 2 + (y - goal_y) ** 2) ** 0.5
-            # if (
-            #     distance_to_goal < self.goal_tolerance
-            # ):  # Only consider points that are outside goal tolerance
-            #     break
             trajectory.append((x, y, yaw))
 
         return trajectory
@@ -277,14 +253,10 @@ class DWALocalPlanner:
         min_speed_cost = float("inf")
         min_heading_cost = float("inf")
         min_goal_cost = float("inf")
+        min_collision_cost = float("inf")
 
         visualize_trajectories = []
         best_traj_index = -1
-
-        adative_time_horizon = self.get_adaptive_time_horizon(
-            goal_x,
-            goal_y,
-        )
 
         for v in possible_linear_velocities:
             for w in possible_angular_velocities:
@@ -292,10 +264,7 @@ class DWALocalPlanner:
                 trajectory = self.predict_motion(
                     v,
                     w,
-                    # adative_time_horizon,
                     self.time_horizon,
-                    goal_x,
-                    goal_y,
                 )
 
                 # visualize_trajectories.append(trajectory) # For all trajectories
@@ -307,17 +276,19 @@ class DWALocalPlanner:
                     trajectory
                 )  # Average cost per step
 
-                goal_cost = self.get_goal_cost(trajectory, goal_x, goal_y)
-                speed_cost = self.get_speed_cost(v, w)
-                heading_cost = self.get_heading_cost(trajectory, goal_x, goal_y)
+                goal_cost = self.get_goal_cost(trajectory, goal_x, goal_y) * 1.0
+                speed_cost = self.get_speed_cost(v, w) * 0.1
+                heading_cost = self.get_heading_cost(trajectory, goal_x, goal_y) * 0.1
+                collision_cost = collision_cost * 10.0
 
-                total_cost = 1.0 * goal_cost + 0.1 * speed_cost + 0.1 * heading_cost
+                total_cost = goal_cost + speed_cost + heading_cost + collision_cost
 
                 if total_cost < min_cost:
                     min_cost = total_cost
                     min_speed_cost = speed_cost
                     min_heading_cost = heading_cost
                     min_goal_cost = goal_cost
+                    min_collision_cost = collision_cost
                     best_velocity_command = (v, w)
                     best_traj_index = len(visualize_trajectories)
 
@@ -326,7 +297,7 @@ class DWALocalPlanner:
         #     f"Best velocity command: v = {best_velocity_command[0]:.3f}, w = {best_velocity_command[1]:.3f}"
         # )
         # print(
-        #     f"Costs => Total: {min_cost:.3f}, Goal: {min_goal_cost:.3f}, Speed: {min_speed_cost:.3f}, Heading: {min_heading_cost:.3f}"
+        #     f"Costs => Total: {min_cost:.3f}, Goal: {min_goal_cost:.3f}, Speed: {min_speed_cost:.3f}, Heading: {min_heading_cost:.3f}, Collision: {min_collision_cost:.3f}"
         # )
         # print(f"Goal position: x = {goal_x:.3f}, y = {goal_y:.3f}")
         # print(
