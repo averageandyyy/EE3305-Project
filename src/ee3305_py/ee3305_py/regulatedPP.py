@@ -15,7 +15,7 @@ class Controller(Node):
 
         # ✅ Adaptive lookahead settings
         self.declare_parameter("min_lookahead", 0.3)  # smallest lookahead (m)
-        self.declare_parameter("max_lookahead", 0.6)  # largest lookahead (m)
+        self.declare_parameter("max_lookahead", 0.7)  # largest lookahead (m)
         self.declare_parameter("lookahead_gain", 1.0)  # scaling factor * speed
 
         self.declare_parameter("base_lin_vel", 0.2)
@@ -23,16 +23,16 @@ class Controller(Node):
         self.declare_parameter("max_ang_vel", 2.0)
         self.declare_parameter("stop_thres", 0.1)
         self.declare_parameter(
-            "curvature_slowdown_gain", 0.8
+            "curvature_slowdown_gain", 0.4
         )  # the higher the more slowdown
         self.declare_parameter(
-            "goal_slowdown_distance", 0.2
+            "goal_slowdown_distance", 0.3
         )  # the higher the closer the robot slow down
         self.declare_parameter("enable_debug_log", True)
 
         self.declare_parameter("rotate_threshold", 0.785)  # 45 deg
 
-        self.declare_parameter("rotate_tolerance", 0.5)  # stop rotating if 11 deg
+        self.declare_parameter("rotate_tolerance", 0.2)  # stop rotating if 11 deg
         self.declare_parameter("rotate_speed", 0.5)  # rad/s
         self.declare_parameter("rotate_gain", 1)  # angular speed scaling factor
 
@@ -169,7 +169,7 @@ class Controller(Node):
         PP_heading_error = atan2(local_y, local_x)
         curvature = 0.0
 
-        if abs(PP_heading_error) < 0.785:  # 45 degrees
+        if abs(PP_heading_error) < 0.785 and dist > self.stop_thres_:  # 45 degrees and never reach goal
             # curvature (avoid division by zero)
             denom = max(1e-6, local_x**2 + local_y**2)
             curvature = (2.0 * local_y) / denom
@@ -198,6 +198,9 @@ class Controller(Node):
             self.get_logger().info(
                 f"abs(PP_heading_error) = {abs(PP_heading_error):.3f} > 0.785, rotating on the spot."
             )
+            # Stop rotating if within tolerance
+            if abs(PP_heading_error) < self.rotate_tolerance_:
+                ang_vel = 0.0
 
         cmd = TwistStamped()
         cmd.header.stamp = self.get_clock().now().to_msg()
