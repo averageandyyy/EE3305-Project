@@ -44,6 +44,16 @@ class Planner(Node):
         self.declare_parameter("bezier_downsample_min_dist", float(0.5))
         self.declare_parameter("bezier_downsample_angle_thresh", float(60.0))
 
+        # Fast-RRT* parameters
+        self.declare_parameter("max_iterations", int(20000))
+        self.declare_parameter("min_iterations", int(2000))
+        self.declare_parameter("expansion_radius", float(5.0))
+        self.declare_parameter("search_radius", float(2.0))
+        self.declare_parameter("dichotomy_distance", float(0.05))
+        self.declare_parameter("tolerance_distance", float(0.1))
+        self.declare_parameter("use_costmap", bool(False))
+        self.declare_parameter("goal_frequency", float(0.2))
+
         # Parameters: Get Values
         self.max_access_cost_ = self.get_parameter("max_access_cost").value
 
@@ -132,7 +142,14 @@ class Planner(Node):
             self.costmap_cols_,
             self.costmap_rows_,
             self.max_access_cost_,
-            use_costmap=False,
+            max_iterations=self.get_parameter("max_iterations").value,
+            min_iterations=self.get_parameter("min_iterations").value,
+            expansion_radius=self.get_parameter("expansion_radius").value,
+            search_radius=self.get_parameter("search_radius").value,
+            dichotomy_distance=self.get_parameter("dichotomy_distance").value,
+            tolerance_distance=self.get_parameter("tolerance_distance").value,
+            use_costmap=self.get_parameter("use_costmap").value,
+            goal_frequency=self.get_parameter("goal_frequency").value,
         )
 
         self.AStarPlanner_ = AStarPlanner(
@@ -169,6 +186,8 @@ class Planner(Node):
         # self.has_new_request_ = False
         # return
 
+        # NOTE: FastRRTStar on its own is not usable due to sparsity of waypoints.
+        # NOTE: We recommend disabling controls to see the output path.
         # -------- FastRRTStar --------
         # start_time = time.perf_counter()
         # path = self.FRRTStarPlanner_.make_plan(
@@ -225,68 +244,17 @@ class Planner(Node):
         # return
 
         # -------- Dijkstra + Bezier Smoothing --------
-        start_time = time.perf_counter()
-        # Get raw path from Dijkstra as list of (x, y) tuples
-        raw_path = []
-        nodes = self._dijkstra_get_path(self.rbt_x_, self.rbt_y_, self.goal_x_, self.goal_y_)
-        for node in nodes:
-            x, y = self.CRToXY_(node.c, node.r)
-            raw_path.append((x, y))
-        end_time = time.perf_counter()
-        print(f"Dijkstra planning took {end_time - start_time:.4f} seconds.")
-
-        if len(raw_path) == 0:
-            self.get_logger().warn("No Path Found!")
-            self.has_new_request_ = False
-            return
-
-        # Apply Bezier smoothing
-        def est_yaw(pts, head=True):
-            if len(pts) < 2: return None
-            a, b = (pts[0], pts[1]) if head else (pts[-2], pts[-1])
-            return atan2(b[1]-a[1], b[0]-a[0])
-
-        # estimates the yaw at the start and end of the planned path
-        # (give dir of where it should face initially and at the end)
-        start_yaw = est_yaw(raw_path, head=True)
-        end_yaw = est_yaw(raw_path, head=False)
-
-        smoothed = self.BezierSmoother_.smooth(
-            raw_pts=raw_path,
-            offset_frac=self.bezier_offset_frac_,
-            samples_per_seg=self.bezier_samples_per_seg_,
-            start_yaw=start_yaw,
-            end_yaw=end_yaw,
-            target_spacing=self.bezier_target_spacing_,
-            max_points=self.bezier_max_points_,
-            min_dist=self.bezier_downsample_min_dist_,
-            angle_thresh_deg=self.bezier_downsample_angle_thresh_
-        )
-
-        # Publish smoothed path
-        msg_path = Path()
-        msg_path.header.stamp = self.get_clock().now().to_msg()
-        msg_path.header.frame_id = "map"
-        for (x, y) in smoothed:
-            pose = PoseStamped()
-            pose.pose.position.x = float(x)
-            pose.pose.position.y = float(y)
-            msg_path.poses.append(pose)
-        self.pub_path_.publish(msg_path)
-        self.get_logger().info(
-            f"Path Found (Dijkstra + Bezier) from Rbt @ ({self.rbt_x_:7.3f}, {self.rbt_y_:7.3f}) to Goal @ ({self.goal_x_:7.3f},{self.goal_y_:7.3f})"
-        )
-
-        # -------- A* + Bezier Smoothing --------
         # start_time = time.perf_counter()
-        # raw_path = self.AStarPlanner_.make_plan(
-        #     self.rbt_x_,
-        #     self.rbt_y_,
-        #     self.goal_x_,
-        #     self.goal_y_,
+        # # Get raw path from Dijkstra as list of (x, y) tuples
+        # raw_path = []
+        # nodes = self._dijkstra_get_path(
+        #     self.rbt_x_, self.rbt_y_, self.goal_x_, self.goal_y_
         # )
+        # for node in nodes:
+        #     x, y = self.CRToXY_(node.c, node.r)
+        #     raw_path.append((x, y))
         # end_time = time.perf_counter()
-        # print(f"A* planning took {end_time - start_time:.4f} seconds.")
+        # print(f"Dijkstra planning took {end_time - start_time:.4f} seconds.")
 
         # if len(raw_path) == 0:
         #     self.get_logger().warn("No Path Found!")
@@ -295,10 +263,13 @@ class Planner(Node):
 
         # # Apply Bezier smoothing
         # def est_yaw(pts, head=True):
-        #     if len(pts) < 2: return None
+        #     if len(pts) < 2:
+        #         return None
         #     a, b = (pts[0], pts[1]) if head else (pts[-2], pts[-1])
-        #     return atan2(b[1]-a[1], b[0]-a[0])
+        #     return atan2(b[1] - a[1], b[0] - a[0])
 
+        # # estimates the yaw at the start and end of the planned path
+        # # (give dir of where it should face initially and at the end)
         # start_yaw = est_yaw(raw_path, head=True)
         # end_yaw = est_yaw(raw_path, head=False)
 
@@ -311,23 +282,77 @@ class Planner(Node):
         #     target_spacing=self.bezier_target_spacing_,
         #     max_points=self.bezier_max_points_,
         #     min_dist=self.bezier_downsample_min_dist_,
-        #     angle_thresh_deg=self.bezier_downsample_angle_thresh_
+        #     angle_thresh_deg=self.bezier_downsample_angle_thresh_,
         # )
 
         # # Publish smoothed path
         # msg_path = Path()
         # msg_path.header.stamp = self.get_clock().now().to_msg()
         # msg_path.header.frame_id = "map"
-        # for (x, y) in smoothed:
+        # for x, y in smoothed:
         #     pose = PoseStamped()
         #     pose.pose.position.x = float(x)
         #     pose.pose.position.y = float(y)
         #     msg_path.poses.append(pose)
         # self.pub_path_.publish(msg_path)
         # self.get_logger().info(
-        #     f"Path Found (A* + Bezier) from Rbt @ ({self.rbt_x_:7.3f}, {self.rbt_y_:7.3f}) to Goal @ ({self.goal_x_:7.3f},{self.goal_y_:7.3f})"
+        #     f"Path Found (Dijkstra + Bezier) from Rbt @ ({self.rbt_x_:7.3f}, {self.rbt_y_:7.3f}) to Goal @ ({self.goal_x_:7.3f},{self.goal_y_:7.3f})"
         # )
 
+        # -------- A* + Bezier Smoothing --------
+        start_time = time.perf_counter()
+        raw_path = self.AStarPlanner_.make_plan(
+            self.rbt_x_,
+            self.rbt_y_,
+            self.goal_x_,
+            self.goal_y_,
+        )
+        end_time = time.perf_counter()
+        print(f"A* planning took {end_time - start_time:.4f} seconds.")
+
+        if len(raw_path) == 0:
+            self.get_logger().warn("No Path Found!")
+            self.has_new_request_ = False
+            return
+
+        # Apply Bezier smoothing
+        def est_yaw(pts, head=True):
+            if len(pts) < 2:
+                return None
+            a, b = (pts[0], pts[1]) if head else (pts[-2], pts[-1])
+            return atan2(b[1] - a[1], b[0] - a[0])
+
+        start_yaw = est_yaw(raw_path, head=True)
+        end_yaw = est_yaw(raw_path, head=False)
+
+        smoothed = self.BezierSmoother_.smooth(
+            raw_pts=raw_path,
+            offset_frac=self.bezier_offset_frac_,
+            samples_per_seg=self.bezier_samples_per_seg_,
+            start_yaw=start_yaw,
+            end_yaw=end_yaw,
+            target_spacing=self.bezier_target_spacing_,
+            max_points=self.bezier_max_points_,
+            min_dist=self.bezier_downsample_min_dist_,
+            angle_thresh_deg=self.bezier_downsample_angle_thresh_,
+        )
+
+        # Publish smoothed path
+        msg_path = Path()
+        msg_path.header.stamp = self.get_clock().now().to_msg()
+        msg_path.header.frame_id = "map"
+        for x, y in smoothed:
+            pose = PoseStamped()
+            pose.pose.position.x = float(x)
+            pose.pose.position.y = float(y)
+            msg_path.poses.append(pose)
+        self.pub_path_.publish(msg_path)
+        self.get_logger().info(
+            f"Path Found (A* + Bezier) from Rbt @ ({self.rbt_x_:7.3f}, {self.rbt_y_:7.3f}) to Goal @ ({self.goal_x_:7.3f},{self.goal_y_:7.3f})"
+        )
+
+        # NOTE: FastRRTStar is currently not usable as it produces paths that are too close to obstacles.
+        # NOTE: We recommend disabling controls to see the output path.
         # -------- FastRRTStar + Bezier Smoothing --------
         # start_time = time.perf_counter()
         # path = self.FRRTStarPlanner_.make_plan(
@@ -349,9 +374,10 @@ class Planner(Node):
 
         # # Apply Bezier smoothing
         # def est_yaw(pts, head=True):
-        #     if len(pts) < 2: return None
+        #     if len(pts) < 2:
+        #         return None
         #     a, b = (pts[0], pts[1]) if head else (pts[-2], pts[-1])
-        #     return atan2(b[1]-a[1], b[0]-a[0])
+        #     return atan2(b[1] - a[1], b[0] - a[0])
 
         # start_yaw = est_yaw(raw_path, head=True)
         # end_yaw = est_yaw(raw_path, head=False)
@@ -365,14 +391,15 @@ class Planner(Node):
         #     target_spacing=self.bezier_target_spacing_,
         #     max_points=self.bezier_max_points_,
         #     min_dist=self.bezier_downsample_min_dist_,
-        #     angle_thresh_deg=self.bezier_downsample_angle_thresh_
+        #     angle_thresh_deg=self.bezier_downsample_angle_thresh_,
+        #     safe_mode=False,
         # )
 
         # # Publish smoothed path
         # msg_path = Path()
         # msg_path.header.stamp = self.get_clock().now().to_msg()
         # msg_path.header.frame_id = "map"
-        # for (x, y) in smoothed:
+        # for x, y in smoothed:
         #     pose = PoseStamped()
         #     pose.pose.position.x = float(x)
         #     pose.pose.position.y = float(y)
@@ -520,9 +547,7 @@ class Planner(Node):
     # Runs the path planning algorithm based on the world coordinates.
     def dijkstra_(self, start_x, start_y, goal_x, goal_y):
         start_time = time.perf_counter()
-        # Initializations ---------------------------------
 
-        # Initialize nodes
         # Initialize all nodes with infinite cost and no parents by default
         nodes = [
             DijkstraNode(c, r)
@@ -544,7 +569,7 @@ class Planner(Node):
         # Create visited set
         visited = set()
 
-        # Expansion Loop ---------------------------------
+        # Expansion
         while len(open_list) > 0:
 
             # Poll cheapest node
