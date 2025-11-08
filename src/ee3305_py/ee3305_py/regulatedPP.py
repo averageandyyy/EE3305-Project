@@ -4,6 +4,7 @@ import rclpy
 from geometry_msgs.msg import PoseStamped, TwistStamped
 from nav_msgs.msg import Odometry, Path
 from rclpy.node import Node
+from ee3305_py.RPP_controller import RPPController
 
 
 class Controller(Node):
@@ -72,6 +73,22 @@ class Controller(Node):
         self.received_path_ = False
         self.received_odom_ = False
         self.path_poses_ = []
+
+        self.RPP_controller_ = RPPController(
+            min_lookahead=self.min_ld_,
+            max_lookahead=self.max_ld_,
+            lookahead_gain=self.ld_gain_,
+            base_linear_velocity=self.base_lin_vel_,
+            max_linear_velocity=self.max_lin_vel_,
+            max_angular_velocity=self.max_ang_vel_,
+            curvature_slowdown_gain=self.curvature_slowdown_gain_,
+            goal_slowdown_distance=self.goal_slowdown_distance_,
+            stop_threshold=self.stop_thres_,
+            rotate_threshold=self.rotate_threshold_,
+            rotate_tolerance=self.rotate_tolerance_,
+            rotate_speed=self.rotate_speed_,
+            rotate_gain=self.rotate_gain_,
+        )
 
     # -------------------- Callbacks --------------------------------
     def callbackSubPath_(self, msg: Path):
@@ -153,54 +170,19 @@ class Controller(Node):
     def callbackTimer_(self):
         if not (self.received_path_ and self.received_odom_):
             return
-
+        
         lx, ly = self.getLookaheadPoint_()
+
         if lx is None:
             return
-
-        # Transform target to robot frame
-        dx = lx - self.rbt_x_
-        dy = ly - self.rbt_y_
-        local_x = dx * cos(self.rbt_yaw_) + dy * sin(self.rbt_yaw_)
-        local_y = -dx * sin(self.rbt_yaw_) + dy * cos(self.rbt_yaw_)
-
-        dist = hypot(local_x, local_y)
-
-        PP_heading_error = atan2(local_y, local_x)
-        curvature = 0.0
-
-        if abs(PP_heading_error) < 0.785 and dist > self.stop_thres_:  # 45 degrees and never reach goal
-            # curvature (avoid division by zero)
-            denom = max(1e-6, local_x**2 + local_y**2)
-            curvature = (2.0 * local_y) / denom
-
-            # === Velocity Regulation ===
-            # base speed reduced by curvature and goal proximity
-            curve_factor = 1.0 / (1.0 + self.curvature_slowdown_gain_ * abs(curvature))
-            dist_to_goal = hypot(
-                self.path_poses_[-1].pose.position.x - self.rbt_x_,
-                self.path_poses_[-1].pose.position.y - self.rbt_y_,
-            )
-            goal_factor = min(1.0, dist_to_goal / self.goal_slowdown_distance_)
-
-            lin_vel = self.base_lin_vel_ * curve_factor * goal_factor
-            lin_vel = min(lin_vel, self.max_lin_vel_)
-            # angular velocity from curvature
-            ang_vel = curvature * lin_vel
-            ang_vel = max(-self.max_ang_vel_, min(self.max_ang_vel_, ang_vel))
-        else:
-            # Too far off heading → rotate on the spot
-            lin_vel = 0.0
-
-            # Angular velocity proportional to heading_error, limited by max_ang_vel_
-            ang_vel = self.rotate_gain_ * PP_heading_error
-            ang_vel = max(-self.max_ang_vel_, min(self.max_ang_vel_, ang_vel))
-            self.get_logger().info(
-                f"abs(PP_heading_error) = {abs(PP_heading_error):.3f} > 0.785, rotating on the spot."
-            )
-            # Stop rotating if within tolerance
-            if abs(PP_heading_error) < self.rotate_tolerance_:
-                ang_vel = 0.0
+        lin_vel, ang_vel = self.RPP_controller_.get_velocity_command(
+            current_x = self.rbt_x_,
+            current_y = self.rbt_y_,
+            current_yaw = self.rbt_yaw_,
+            lookahead_x = lx,
+            lookahead_y = ly,
+        )
+         # Publish cmd_vel
 
         cmd = TwistStamped()
         cmd.header.stamp = self.get_clock().now().to_msg()
@@ -208,11 +190,6 @@ class Controller(Node):
         cmd.twist.linear.x = lin_vel
         cmd.twist.angular.z = ang_vel
         self.pub_cmd_vel_.publish(cmd)
-
-        if self.enable_debug_log_:
-            self.get_logger().info(
-                f"ld={dist:.2f}, curv={curvature:.3f}, v={lin_vel:.2f}, w={ang_vel:.2f}"
-            )
 
 
 def main(args=None):
