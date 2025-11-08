@@ -6,12 +6,43 @@ behavior:
 controller:
   ros__parameters:
     frequency: 20.0 # {double} [Hz]
-    lookahead_distance: 0.2 # {double} [m]
-    # lookahead_distance: 0.5 # {double} [m]
+    # lookahead_distance: 0.2 # {double} [m]
+    lookahead_distance: 0.5 # {double} [m]
     lookahead_lin_vel: 0.2 # {double} [m/s]
     stop_thres: 0.1 # {double} [m]
     max_lin_vel: 0.2 # {double} [m/s]
     max_ang_vel: 2.0 # {double} [rad/s]
+
+    # DWA Parameters
+    dt: 0.05 # {double} [s] Time step for simulation
+    linear_velocity_resolution: 0.02 # {double} [m/s] Resolution of linear velocity samples
+    angular_velocity_resolution: 0.2 # {double} [rad/s] Resolution of angular velocity samples
+    time_horizon: 2.0 # {double} [s] Time horizon for trajectory simulation
+    goal_tolerance: 0.1 # {double} [m] Distance to goal to consider reached
+    max_linear_acceleration: 2.0 # {double} [m/s^2] Maximum linear acceleration
+    max_angular_acceleration: 20.0 # {double} [rad/s^2] Maximum angular acceleration
+    goal_weight: 1.0 # {double} [] Weight for goal distance in cost function
+    heading_weight: 0.1 # {double} [] Weight for heading in cost function
+    speed_weight: 0.1 # {double} [] Weight for speed in cost function
+    obstacle_weight: 5.0 # {double} [] Weight for obstacle distance in cost
+
+    # RPP Parameters
+    min_lookahead: 0.3 # {double} [m] Smallest lookahead (m)
+    max_lookahead: 0.7 # {double} [m] Largest lookahead (m)
+    lookahead_gain: 1.0 # {double} [] Scaling factor * speed
+    base_lin_vel: 0.2 # {double} [m/s] Base linear velocity
+    curvature_slowdown_gain: 0.4 # {double} [] The higher the more slowdown
+    goal_slowdown_distance: 0.3 # {double} [m] The higher the closer the robot slow down
+    enable_debug_log: true # {bool} [] Enable debug logging
+    rotate_threshold: 0.785 # {double} [rad] 45 deg
+    rotate_tolerance: 0.2 # {double} [rad] Stop rotating if 11 deg
+    rotate_speed: 0.5 # {double} [rad/s] Rotation speed
+    rotate_gain: 1 # {double} [] Angular speed scaling factor
+
+    # Testing Parameters
+    enable_controls: true # {bool} [] Enable control outputs
+    use_dwa: true # {bool} [] Use DWA local planner
+    use_RPP: false # {bool} [] Use RPP local planner
 
 planner:
   ros__parameters:
@@ -24,3 +55,13 @@ planner:
     bezier_max_points: 800 # {int} Maximum number of points in output path
     bezier_downsample_min_dist: 0.5 # {float} [m] Minimum distance for downsampling
     bezier_downsample_angle_thresh: 60.0 # {float} [deg] Minimum angle for downsampling
+
+    # Fast-RRT* Parameters
+    max_iterations: 20000 # {int} Maximum number of iterations for Fast-RRT*
+    min_iterations: 2000 # {int} Minimum number of iterations for Fast-RRT*
+    expansion_radius: 5.0 # {float} [m] Radius for node expansion
+    search_radius: 2.0 # {float} [m] Radius for rewiring
+    dichotomy_distance: 0.05 # {float} [m] Distance threshold for dichotomy
+    tolerance_distance: 0.1 # {float} [m] Distance threshold for tolerance
+    use_costmap: false # {bool} Whether to use costmap for path cost calculations
+    goal_frequency: 0.2 # {float} [0.0-1.0] Frequency of sampling the goal during planning
