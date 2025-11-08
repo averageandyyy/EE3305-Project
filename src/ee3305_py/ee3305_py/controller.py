@@ -15,6 +15,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 
 from ee3305_py.dwa_planner import DWALocalPlanner
 from ee3305_py.pure_pursuit_controller import PurePursuitController
+from ee3305_py.RPP_controller import RPPController
 
 
 class Controller(Node):
@@ -30,6 +31,22 @@ class Controller(Node):
         self.declare_parameter("stop_thres", float(0.1))
         self.declare_parameter("max_lin_vel", float(0.2))
         self.declare_parameter("max_ang_vel", float(2.0))
+        # RPP Controller Parameters
+        self.declare_parameter("min_lookahead", 0.3)  # smallest lookahead (m)
+        self.declare_parameter("max_lookahead", 0.7)  # largest lookahead (m)
+        self.declare_parameter("lookahead_gain", 1.0)  # scaling factor * speed
+        self.declare_parameter("base_lin_vel", 0.2)
+        self.declare_parameter(
+            "curvature_slowdown_gain", 0.4
+        )  # the higher the more slowdown
+        self.declare_parameter(
+            "goal_slowdown_distance", 0.3
+        )  # the higher the closer the robot slow down
+        self.declare_parameter("enable_debug_log", True)
+        self.declare_parameter("rotate_threshold", 0.785)  # 45 deg
+        self.declare_parameter("rotate_tolerance", 0.2)  # stop rotating if 11 deg
+        self.declare_parameter("rotate_speed", 0.5)  # rad/s
+        self.declare_parameter("rotate_gain", 1)  # angular speed scaling factor
 
         # Parameters: Get Values
         self.frequency_ = self.get_parameter("frequency").value
@@ -38,6 +55,21 @@ class Controller(Node):
         self.stop_thres_ = self.get_parameter("stop_thres").value
         self.max_lin_vel_ = self.get_parameter("max_lin_vel").value
         self.max_ang_vel_ = self.get_parameter("max_ang_vel").value
+        self.min_ld_ = self.get_parameter("min_lookahead").value
+        self.max_ld_ = self.get_parameter("max_lookahead").value
+        self.ld_gain_ = self.get_parameter("lookahead_gain").value
+        self.base_lin_vel_ = self.get_parameter("base_lin_vel").value
+        self.curvature_slowdown_gain_ = self.get_parameter(
+            "curvature_slowdown_gain"
+        ).value
+        self.goal_slowdown_distance_ = self.get_parameter(
+            "goal_slowdown_distance"
+        ).value
+        self.enable_debug_log_ = self.get_parameter("enable_debug_log").value
+        self.rotate_threshold_ = self.get_parameter("rotate_threshold").value
+        self.rotate_tolerance_ = self.get_parameter("rotate_tolerance").value
+        self.rotate_speed_ = self.get_parameter("rotate_speed").value
+        self.rotate_gain_ = self.get_parameter("rotate_gain").value
 
         # Handles: Topic Subscribers
         # !TODO: path subscriber
@@ -81,6 +113,7 @@ class Controller(Node):
         # Testing variables
         self.enable_controls_ = True
         self.using_dwa = False
+        self.using_RPP = True
         self.trajectories_publisher = self.create_publisher(
             MarkerArray,
             "/trajectories",
@@ -108,6 +141,23 @@ class Controller(Node):
             max_linear_velocity=self.max_lin_vel_,
             max_angular_velocity=self.max_ang_vel_,
         )
+
+        self.RPP_controller_ = RPPController(
+            min_lookahead=self.min_ld_,
+            max_lookahead=self.max_ld_,
+            lookahead_gain=self.ld_gain_,
+            base_linear_velocity=self.base_lin_vel_,
+            max_linear_velocity=self.max_lin_vel_,
+            max_angular_velocity=self.max_ang_vel_,
+            curvature_slowdown_gain=self.curvature_slowdown_gain_,
+            goal_slowdown_distance=self.goal_slowdown_distance_,
+            stop_threshold=self.stop_thres_,
+            rotate_threshold=self.rotate_threshold_,
+            rotate_tolerance=self.rotate_tolerance_,
+            rotate_speed=self.rotate_speed_,
+            rotate_gain=self.rotate_gain_,
+        )
+
 
     # Callbacks =============================================================
 
@@ -211,6 +261,58 @@ class Controller(Node):
 
         # Return the coordinates
         return lookahead_x, lookahead_y
+    
+    # Compute adaptive lookahead distance
+    def computeAdaptiveLookahead_(self):
+        Ld = self.min_ld_ + self.ld_gain_ * abs(self.rbt_linear_velocity_)
+        return max(self.min_ld_, min(self.max_ld_, Ld))
+    
+    def get_RPP_lookahead_point_(self):
+        if not self.path_poses_:
+            return None, None
+
+        # 1. Find closest path point
+        closest_dist = float("inf")
+        closest_idx = 0
+        for i, pose in enumerate(self.path_poses_):
+            px = pose.pose.position.x
+            py = pose.pose.position.y
+            d = hypot(px - self.rbt_x_, py - self.rbt_y_)
+            if d < closest_dist:
+                closest_dist = d
+                closest_idx = i
+
+
+        # 2. Use adaptive lookahead distance
+        target_ld = self.computeAdaptiveLookahead_()
+
+
+        # 3. Find first point at or beyond lookahead distance
+        lookahead_idx = len(self.path_poses_) - 1
+        for i in range(closest_idx, len(self.path_poses_)):
+            px = self.path_poses_[i].pose.position.x
+            py = self.path_poses_[i].pose.position.y
+            d = hypot(px - self.rbt_x_, py - self.rbt_y_)
+            if d >= target_ld:
+                lookahead_idx = i
+                break
+
+
+        pose = self.path_poses_[lookahead_idx]
+        lx = pose.pose.position.x
+        ly = pose.pose.position.y
+
+
+        # Publish lookahead point for visualization
+        msg = PoseStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = "map"
+        msg.pose.position.x = lx
+        msg.pose.position.y = ly
+        self.pub_look_ahead_.publish(msg)
+
+        return lx, ly
+
 
     # Implement the pure pursuit controller here
     def callbackTimer_(self):
@@ -263,6 +365,15 @@ class Controller(Node):
                 marker_array.markers.append(marker)
 
             self.trajectories_publisher.publish(marker_array)
+        elif self.using_RPP:
+            lookaheadRPP_x, lookaheadRPP_y = self.get_RPP_lookahead_point_()
+            best_velocity_command = self.RPP_controller_.get_velocity_command(
+                current_x=self.rbt_x_,
+                current_y=self.rbt_y_,
+                current_yaw=self.rbt_yaw_,
+                lookahead_x=lookaheadRPP_x,
+                lookahead_y=lookaheadRPP_y,
+            )
         else:
             best_velocity_command = self.pure_pursuit_controller_.get_velocity_command(
                 current_x=self.rbt_x_,
@@ -273,6 +384,9 @@ class Controller(Node):
             )
 
         lin_vel, ang_vel = best_velocity_command
+        self.get_logger().info(
+            f"Computed velocities - Linear: {lin_vel:.3f} m/s, Angular: {ang_vel:.3f} rad/s"
+        )
 
         # publish velocities
         msg_cmd_vel = TwistStamped()
