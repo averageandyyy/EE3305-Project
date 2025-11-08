@@ -10,7 +10,6 @@ class BezierSmoother:
         self.rows_ = rows
         self.max_cost_ = max_access_cost
 
-    # --- map helpers (same math as your planners) ---
     def _xy_to_cr(self, x, y):
         c = int((x - self.origin_x_) / self.res_ - 0.5)
         r = int((y - self.origin_y_) / self.res_ - 0.5)
@@ -26,20 +25,13 @@ class BezierSmoother:
         idx = r * self.cols_ + c
         return self.costmap_[idx] < self.max_cost_
 
-    # --- small utilities ---
     def _unit(self, v):
         n = np.linalg.norm(v)
         return v / n if n > 1e-9 else v
 
+    # Downsample path by removing points that are too close or don't have significant turn angles
     def _downsample_path(self, pts, min_dist=0.5, angle_thresh_deg=60.0):
-        """
-        Downsample path by removing points that are too close or don't have significant turns.
         
-        Args:
-            pts: list of (x,y) tuples
-            min_dist: minimum distance between kept points (meters)
-            angle_thresh_deg: minimum turn angle to keep a point (degrees)
-        """
         if len(pts) <= 2:
             return pts[:]
         out = [pts[0]]
@@ -101,39 +93,22 @@ class BezierSmoother:
             out.append(tuple(pts[-1]))
         return out
 
-    
-    # offset frac (0.2-0.4) controls how "tight" the curve is, but risk collision
-    # samples_per_seg controls smoothness for each segment (how dense, 50-120)
+    # dont change params here, change in run.yaml instead
     def smooth(self, raw_pts, offset_frac=0.3, samples_per_seg=10,
-               start_yaw=None, end_yaw=None, yaw_bias=0.6, 
+               start_yaw=None, end_yaw=None,
                target_spacing=0.04, max_points=800,
                min_dist=0.5, angle_thresh_deg=60.0):
-        """
-        Apply Bezier curve smoothing to a raw path.
         
-        Args:
-            raw_pts: list[(x,y)] polyline from A*/Dijkstra/RRT*
-            offset_frac: controls curve tightness (0.2-0.4), higher = smoother but more collision risk
-            samples_per_seg: number of samples per bezier segment (affects curve density)
-            start_yaw: optional starting yaw angle (radians)
-            end_yaw: optional ending yaw angle (radians)
-            yaw_bias: how much to bias toward start/end yaw (0=ignore, 1=full bias)
-            target_spacing: target spacing between output points (meters)
-            max_points: maximum number of points in output path
-            min_dist: minimum distance for downsampling (meters)
-            angle_thresh_deg: minimum angle for downsampling (degrees)
-            
-        Returns:
-            list[(x,y)] smoothed polyline (or raw if smoothing collides)
-        """
+        # controls how much to bias toward start/end yaw of robot
+        yaw_bias = 0.6
+
         if len(raw_pts) < 3:
             return raw_pts[:]
-        # tune angle_thresh_dist (increase if want fewer anchor points, smoother)
+        # get downsampled key points by reducing redundant points thru min dist and angle
         key = self._downsample_path(raw_pts, min_dist=min_dist, angle_thresh_deg=angle_thresh_deg)
         if len(key) < 3:
             return raw_pts[:]
 
-        # tangents per key point
         tangents = []
         N = len(key)
         for i in range(N):
@@ -170,18 +145,15 @@ class BezierSmoother:
                 seg = seg[1:]  # avoid duplicates
             smoothed.append(seg)
 
-        # safety: if any point is in collision, keep raw path
-        # return smoothed if self._collision_free_polyline(smoothed) else raw_pts[:]
         smoothed_dense = np.vstack(smoothed).tolist()
 
-        # Safety first: check the dense curve
         if not self._collision_free_polyline(smoothed_dense):
             return raw_pts[:]
 
-        # NEW: resample to fixed spatial spacing for RViz/controller
+        # resample to fixed spatial spacing for controller
         smoothed = self._resample_polyline_by_dist(smoothed_dense, step=target_spacing)
 
-        # Optional: cap the total poses to keep RViz snappy
+        # cap at max points to reduce RViz lag
         if len(smoothed) > max_points:
             stride = max(1, len(smoothed) // max_points)
             smoothed = smoothed[::stride]

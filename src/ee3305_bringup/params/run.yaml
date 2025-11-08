@@ -20,7 +20,6 @@ planner:
     # Bezier Smoothing Parameters
     bezier_offset_frac: 0.3 # {float} [0.2-0.5] Controls curve tightness (higher = smoother but more collision risk)
     bezier_samples_per_seg: 10 # {int} [5-50] Number of samples per bezier segment (affects curve density)
-    bezier_yaw_bias: 0.6 # {float} [0.0-1.0] Bias toward start/end yaw (0=ignore, 1=full bias)
     bezier_target_spacing: 0.04 # {float} [m] Target spacing between output points
     bezier_max_points: 800 # {int} Maximum number of points in output path
     bezier_downsample_min_dist: 0.5 # {float} [m] Minimum distance for downsampling
