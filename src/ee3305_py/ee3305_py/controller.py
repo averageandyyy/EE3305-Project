@@ -111,14 +111,33 @@ class Controller(Node):
         self.received_path_ = False
 
         # Testing variables
-        self.enable_controls_ = True
-        self.using_dwa = False
-        self.using_RPP = True
-        self.trajectories_publisher = self.create_publisher(
-            MarkerArray,
-            "/trajectories",
-            10,
-        )
+        self.declare_parameter("enable_controls", True)
+        self.declare_parameter("use_dwa", False)
+        self.declare_parameter("use_RPP", False)
+        self.enable_controls_ = self.get_parameter("enable_controls").value
+        self.using_dwa = self.get_parameter("use_dwa").value
+        self.using_RPP = self.get_parameter("use_RPP").value
+        assert not (self.using_dwa and self.using_RPP), "Cannot use both DWA and RPP!"
+
+        if self.using_dwa:
+            self.get_logger().info("Using DWA Local Planner")
+            # DWA Parameters
+            self.declare_parameter("dt", 0.05)
+            self.declare_parameter("linear_velocity_resolution", 0.02)
+            self.declare_parameter("angular_velocity_resolution", 0.2)
+            self.declare_parameter("time_horizon", 2.0)
+            self.declare_parameter("goal_tolerance", 0.1)
+            self.declare_parameter("max_linear_acceleration", 2.0)
+            self.declare_parameter("max_angular_acceleration", 20.0)
+            self.declare_parameter("goal_weight", 1.0)
+            self.declare_parameter("heading_weight", 0.1)
+            self.declare_parameter("speed_weight", 0.1)
+            self.declare_parameter("obstacle_weight", 5.0)
+            self.trajectories_publisher = self.create_publisher(
+                MarkerArray,
+                "/trajectories",
+                10,
+            )
 
         qos_profile_latch = QoSProfile(
             history=qos_profile_services_default.history,
@@ -158,7 +177,6 @@ class Controller(Node):
             rotate_gain=self.rotate_gain_,
         )
 
-
     # Callbacks =============================================================
 
     # Occupancy grid subscriber callback for DWA planner
@@ -172,19 +190,40 @@ class Controller(Node):
         self.costmap_rows_ = msg.info.height
         self.costmap_cols_ = msg.info.width
 
-        self.costmap_max_access_cost_ = 90  # Hardcoded for now
+        self.costmap_max_access_cost_ = 90  # Hardcoded
 
-        self.dwa_planner_ = DWALocalPlanner(
-            costmap=self.costmap_,
-            origin_x=self.costmap_origin_x_,
-            origin_y=self.costmap_origin_y_,
-            resolution=self.costmap_resolution_,
-            columns=self.costmap_cols_,
-            rows=self.costmap_rows_,
-            max_access_cost=self.costmap_max_access_cost_,
-            max_linear_velocity=self.max_lin_vel_,
-            max_angular_velocity=self.max_ang_vel_,
-        )
+        # DWA Initialization requires costmap info
+        if self.using_dwa:
+            self.dwa_planner_ = DWALocalPlanner(
+                costmap=self.costmap_,
+                origin_x=self.costmap_origin_x_,
+                origin_y=self.costmap_origin_y_,
+                resolution=self.costmap_resolution_,
+                columns=self.costmap_cols_,
+                rows=self.costmap_rows_,
+                max_access_cost=self.costmap_max_access_cost_,
+                max_linear_velocity=self.max_lin_vel_,
+                max_angular_velocity=self.max_ang_vel_,
+                max_linear_acceleration=self.get_parameter(
+                    "max_linear_acceleration"
+                ).value,
+                max_angular_acceleration=self.get_parameter(
+                    "max_angular_acceleration"
+                ).value,
+                dt=self.get_parameter("dt").value,
+                linear_velocity_resolution=self.get_parameter(
+                    "linear_velocity_resolution"
+                ).value,
+                angular_velocity_resolution=self.get_parameter(
+                    "angular_velocity_resolution"
+                ).value,
+                time_horizon=self.get_parameter("time_horizon").value,
+                goal_tolerance=self.get_parameter("goal_tolerance").value,
+                goal_weight=self.get_parameter("goal_weight").value,
+                heading_weight=self.get_parameter("heading_weight").value,
+                speed_weight=self.get_parameter("speed_weight").value,
+                obstacle_weight=self.get_parameter("obstacle_weight").value,
+            )
 
         self.received_map_ = True
 
@@ -261,12 +300,12 @@ class Controller(Node):
 
         # Return the coordinates
         return lookahead_x, lookahead_y
-    
+
     # Compute adaptive lookahead distance
     def computeAdaptiveLookahead_(self):
         Ld = self.min_ld_ + self.ld_gain_ * abs(self.rbt_linear_velocity_)
         return max(self.min_ld_, min(self.max_ld_, Ld))
-    
+
     def get_RPP_lookahead_point_(self):
         if not self.path_poses_:
             return None, None
@@ -282,10 +321,8 @@ class Controller(Node):
                 closest_dist = d
                 closest_idx = i
 
-
         # 2. Use adaptive lookahead distance
         target_ld = self.computeAdaptiveLookahead_()
-
 
         # 3. Find first point at or beyond lookahead distance
         lookahead_idx = len(self.path_poses_) - 1
@@ -297,11 +334,9 @@ class Controller(Node):
                 lookahead_idx = i
                 break
 
-
         pose = self.path_poses_[lookahead_idx]
         lx = pose.pose.position.x
         ly = pose.pose.position.y
-
 
         # Publish lookahead point for visualization
         msg = PoseStamped()
@@ -313,14 +348,14 @@ class Controller(Node):
 
         return lx, ly
 
-
     # Implement the pure pursuit controller here
     def callbackTimer_(self):
         if not self.received_odom_ or not self.received_path_ or not self.received_map_:
             return  # return silently if path or odom is not received.
 
         # get lookahead point as subgoal
-        lookahead_x, lookahead_y = self.getLookaheadPoint_()
+        if not self.using_RPP:
+            lookahead_x, lookahead_y = self.getLookaheadPoint_()
 
         if self.using_dwa:
             best_velocity_command, trajectories, best_traj_index = (
