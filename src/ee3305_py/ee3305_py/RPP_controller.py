@@ -57,7 +57,7 @@ class RPPController:
         PP_heading_error = atan2(local_y, local_x)
         curvature = 0.0
 
-        if abs(PP_heading_error) < 0.785 and dist > self.stop_threshold:  # 45 degrees and never reach goal
+        if abs(PP_heading_error) < 0.785: # 45 degrees
             # curvature (avoid division by zero)
             denom = max(1e-6, local_x**2 + local_y**2)
             curvature = (2.0 * local_y) / denom
@@ -83,6 +83,5 @@ class RPPController:
             # Angular velocity proportional to heading_error, limited by max_ang_vel_
             ang_vel = self.rotate_gain * PP_heading_error
             ang_vel = max(-self.max_angular_velocity, min(self.max_angular_velocity, ang_vel))
-            # Stop rotating if within tolerance
 
         return lin_vel, ang_vel
