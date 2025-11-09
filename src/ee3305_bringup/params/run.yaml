@@ -26,9 +26,9 @@ controller:
     obstacle_weight: 5.0 # {double} [] Weight for obstacle distance in cost
 
     # RPP Parameters
-    min_lookahead: 0.3 # {double} [m] Smallest lookahead (m)
+    min_lookahead: 0.2 # {double} [m] Smallest lookahead (m)
     max_lookahead: 0.7 # {double} [m] Largest lookahead (m)
-    lookahead_gain: 1.0 # {double} [] Scaling factor * speed
+    lookahead_gain: 1.5 # {double} [] Scaling factor * speed
     base_lin_vel: 0.2 # {double} [m/s] Base linear velocity
     curvature_slowdown_gain: 0.4 # {double} [] The higher the more slowdown
     goal_slowdown_distance: 0.3 # {double} [m] The higher the closer the robot slow down
@@ -40,8 +40,8 @@ controller:
 
     # Testing Parameters
     enable_controls: true # {bool} [] Enable control outputs
-    use_dwa: true # {bool} [] Use DWA local planner
-    use_RPP: false # {bool} [] Use RPP local planner
+    use_dwa: false # {bool} [] Use DWA local planner
+    use_RPP: true # {bool} [] Use RPP local planner
 
 planner:
   ros__parameters:
